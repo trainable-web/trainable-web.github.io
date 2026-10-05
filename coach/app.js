@@ -110,7 +110,6 @@ function renderAthlete() {
   const plan = data.plans.find((x) => x.week_start_date === week);
   const workouts = data.workouts.filter((x) => x.plan_id === plan?.id);
   const name = p.display_name || (isSelf ? 'Your training' : 'Athlete');
-  const maxActivity = data.activities[0];
   const readiness = data.readiness;
   const metrics = data.metrics;
   const cells = [
@@ -487,7 +486,7 @@ for (const [id, provider] of [['google-sign-in', 'google']]) {
   });
 }
 $('#sign-out').addEventListener('click', async () => {
-  try { await authRequest('logout', { method: 'POST', headers: { Authorization: 'Bearer ' + await token() } }); } catch {}
+  try { await authRequest('logout', { method: 'POST', headers: { Authorization: 'Bearer ' + await token() } }); } catch { /* Clear the local session even if the server is unavailable. */ }
   sessionStorage.removeItem(SESSION_KEY); state.roster = []; state.athlete = null; state.athleteId = null; showAuth('');
 });
 $('#roster-list').addEventListener('click', (event) => { const b = event.target.closest('[data-athlete]'); if (b) selectAthlete(b.dataset.athlete); });
