@@ -2,6 +2,7 @@ const SUPABASE_URL = 'https://txrsajvaqhqrlpsgjeyn.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_omyeFX4y5d9FtUUvg0b4Xg_5rO4atSa';
 const sessionKey = 'trainable_web_session';
 const oauthIntentKey = 'trainable_web_oauth_intent';
+let memorySession = null;
 const form = document.querySelector('#sign-in-form');
 const social = document.querySelector('#social-sign-in');
 const signOut = document.querySelector('#sign-out');
@@ -14,21 +15,18 @@ function setStatus(message, isError = false) {
   status.classList.toggle('is-error', isError);
 }
 function session() {
-  try {
-    const saved = localStorage.getItem(sessionKey);
-    if (saved) return JSON.parse(saved);
-    const previous = sessionStorage.getItem(sessionKey);
-    if (!previous) return null;
-    const value = JSON.parse(previous); saveSession(value); return value;
-  } catch { return null; }
+  try { const saved = localStorage.getItem(sessionKey); if (saved) return JSON.parse(saved); } catch { /* Try the prior tab session. */ }
+  try { const previous = sessionStorage.getItem(sessionKey); if (previous) { const value = JSON.parse(previous); saveSession(value); return value; } } catch { /* Keep the current page usable. */ }
+  return memorySession;
 }
 function saveSession(value) {
   const expires = Number(value.expires_at) || Math.floor(Date.now() / 1000) + Number(value.expires_in || 3600);
   const saved = JSON.stringify({ ...value, expires_at: expires });
-  try { localStorage.setItem(sessionKey, saved); sessionStorage.removeItem(sessionKey); }
-  catch { sessionStorage.setItem(sessionKey, saved); }
+  memorySession = JSON.parse(saved);
+  try { localStorage.setItem(sessionKey, saved); sessionStorage.removeItem(sessionKey); return true; }
+  catch { try { sessionStorage.setItem(sessionKey, saved); } catch { /* In-memory session lasts until this page closes. */ } return false; }
 }
-function clearSession() { try { localStorage.removeItem(sessionKey); } catch { /* Storage may be disabled. */ } sessionStorage.removeItem(sessionKey); }
+function clearSession() { memorySession = null; try { localStorage.removeItem(sessionKey); } catch { /* Storage may be disabled. */ } try { sessionStorage.removeItem(sessionKey); } catch { /* Storage may be disabled. */ } }
 function authError(result, fallback) {
   return new Error(result.msg || result.error_description || result.message || result.error || fallback);
 }

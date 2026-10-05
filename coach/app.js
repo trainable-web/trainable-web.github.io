@@ -3,6 +3,7 @@ const KEY = 'sb_publishable_omyeFX4y5d9FtUUvg0b4Xg_5rO4atSa';
 const LIVE_COACH_URL = 'https://trainable-web.github.io/coach/';
 const SESSION_KEY = 'trainable_web_session';
 const OAUTH_KEY = 'trainable_coach_oauth_intent';
+let memorySession = null;
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const ORDER = [1, 2, 3, 4, 5, 6, 0];
 const ZONES = [['recovery', 'Z1 · Recovery'], ['endurance', 'Z2 · Endurance'], ['tempo', 'Z3 · Tempo'], ['sweet_spot', 'Sweet spot'], ['threshold', 'Z4 · Threshold'], ['vo2max', 'Z5 · VO₂max'], ['anaerobic', 'Z6 · Anaerobic'], ['open', 'Open effort']];
@@ -21,21 +22,18 @@ const localDate = () => { const d = new Date(); return [d.getFullYear(), String(
 const currentWeek = () => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); };
 
 function session() {
-  try {
-    const saved = localStorage.getItem(SESSION_KEY);
-    if (saved) return JSON.parse(saved);
-    const previous = sessionStorage.getItem(SESSION_KEY);
-    if (!previous) return null;
-    const value = JSON.parse(previous); saveSession(value); return value;
-  } catch { return null; }
+  try { const saved = localStorage.getItem(SESSION_KEY); if (saved) return JSON.parse(saved); } catch { /* Try the prior tab session. */ }
+  try { const previous = sessionStorage.getItem(SESSION_KEY); if (previous) { const value = JSON.parse(previous); saveSession(value); return value; } } catch { /* Keep the current page usable. */ }
+  return memorySession;
 }
 function saveSession(value) {
   const expires = Number(value.expires_at) || Math.floor(Date.now() / 1000) + Number(value.expires_in || 3600);
   const saved = JSON.stringify({ ...value, expires_at: expires });
-  try { localStorage.setItem(SESSION_KEY, saved); sessionStorage.removeItem(SESSION_KEY); }
-  catch { sessionStorage.setItem(SESSION_KEY, saved); }
+  memorySession = JSON.parse(saved);
+  try { localStorage.setItem(SESSION_KEY, saved); sessionStorage.removeItem(SESSION_KEY); return true; }
+  catch { try { sessionStorage.setItem(SESSION_KEY, saved); } catch { /* In-memory session lasts until this page closes. */ } return false; }
 }
-function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } sessionStorage.removeItem(SESSION_KEY); }
+function clearSession() { memorySession = null; try { localStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } try { sessionStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } }
 function setStatus(message, isError = false, area = '#global-status') {
   const node = $(area); if (!node) return; node.textContent = message; node.classList.toggle('is-error', isError);
 }
@@ -542,7 +540,7 @@ $('#sign-in-form').addEventListener('submit', async (event) => {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showFieldError('email', 'Enter an email like name@example.com.'); $('#email').focus(); return; }
   if (!password) { showFieldError('password', 'Enter your password.'); $('#password').focus(); return; }
   setStatus('Signing in…', false, '#auth-status');
-  try { const current = await authRequest('token?grant_type=password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }); saveSession(current); await loadWorkspace(); }
+  try { const current = await authRequest('token?grant_type=password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }); saveSession(current); await resumeWorkspace(); }
   catch (error) { setStatus(error.message, true, '#auth-status'); }
 });
 for (const id of ['email', 'password']) {
@@ -741,7 +739,13 @@ $('#drawer-body').addEventListener('change', (event) => {
   }
 });
 async function resumeWorkspace() {
-  try { await loadWorkspace(); return true; }
+  try {
+    await loadWorkspace();
+    let persistent = false;
+    try { persistent = Boolean(localStorage.getItem(SESSION_KEY)); } catch { /* Browser storage is restricted. */ }
+    if (!persistent) setStatus('This browser is not saving your sign-in after the tab closes. Check its site storage settings.', true);
+    return true;
+  }
   catch (error) {
     if (error.authInvalid) { clearSession(); showAuth('Your sign-in expired. Please sign in again.'); }
     else { showAuth('Your sign-in is saved, but Coach could not load right now. Check your connection and try again.'); $('#retry-workspace').hidden = false; }
