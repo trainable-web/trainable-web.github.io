@@ -14,15 +14,26 @@ function setStatus(message, isError = false) {
   status.classList.toggle('is-error', isError);
 }
 function session() {
-  try { return JSON.parse(sessionStorage.getItem(sessionKey) || 'null'); }
-  catch { return null; }
+  try {
+    const saved = localStorage.getItem(sessionKey);
+    if (saved) return JSON.parse(saved);
+    const previous = sessionStorage.getItem(sessionKey);
+    if (!previous) return null;
+    const value = JSON.parse(previous); saveSession(value); return value;
+  } catch { return null; }
 }
-function saveSession(value) { sessionStorage.setItem(sessionKey, JSON.stringify(value)); }
+function saveSession(value) {
+  const expires = Number(value.expires_at) || Math.floor(Date.now() / 1000) + Number(value.expires_in || 3600);
+  const saved = JSON.stringify({ ...value, expires_at: expires });
+  try { localStorage.setItem(sessionKey, saved); sessionStorage.removeItem(sessionKey); }
+  catch { sessionStorage.setItem(sessionKey, saved); }
+}
+function clearSession() { try { localStorage.removeItem(sessionKey); } catch { /* Storage may be disabled. */ } sessionStorage.removeItem(sessionKey); }
 function authError(result, fallback) {
   return new Error(result.msg || result.error_description || result.message || result.error || fallback);
 }
 function showSignIn(message, isError = true) {
-  sessionStorage.removeItem(sessionKey);
+  clearSession();
   form.hidden = false;
   social.hidden = false;
   plans.hidden = true;
@@ -44,7 +55,7 @@ async function authRequest(path, options = {}) {
     headers: { apikey: SUPABASE_ANON_KEY, ...options.headers },
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw authError(result, 'Could not verify your Trainable account.');
+  if (!response.ok) { const error = authError(result, 'Could not verify your Trainable account.'); error.status = response.status; throw error; }
   return result;
 }
 async function refresh(current) {
@@ -64,20 +75,18 @@ async function accessToken() {
     return null;
   }
   try {
-    if (current.expires_at && current.expires_at <= Math.floor(Date.now() / 1000) + 60) {
-      current = await refresh(current);
-    }
-    await authRequest('user', { headers: { Authorization: `Bearer ${current.access_token}` } });
-    return current.access_token;
-  } catch {
-    try {
+    if (current.expires_at <= Math.floor(Date.now() / 1000) + 60) current = await refresh(current);
+    try { await authRequest('user', { headers: { Authorization: `Bearer ${current.access_token}` } }); }
+    catch (error) {
+      if (error.status !== 401) throw error;
       current = await refresh(current);
       await authRequest('user', { headers: { Authorization: `Bearer ${current.access_token}` } });
-      return current.access_token;
-    } catch {
-      showSignIn('Your session has expired. Please sign in again.');
-      return null;
     }
+    return current.access_token;
+  } catch (error) {
+    if (error.status === 400 || error.status === 401) showSignIn('Your session has expired. Please sign in again.');
+    else setStatus('Your sign-in is saved, but billing could not load. Check your connection and try again.', true);
+    return null;
   }
 }
 async function callFunction(name, token, body = {}) {

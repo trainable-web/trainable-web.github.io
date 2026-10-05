@@ -9,21 +9,27 @@
     <meta name="application-name" content="Trainable Coach" />
     <meta name="apple-mobile-web-app-title" content="Trainable Coach" />
     <link rel="icon" href="../assets/trainable-mark-dark.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=20261005-reset-week" />
-    <script src="./app.js?v=20261005-file-signin" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=20261005-coach-desk" />
+    <script src="./app.js?v=20261005-coach-desk" defer></script>
   </head>
   <body>
     <header class="topbar">
       <a class="brand" href="../" aria-label="Trainable home"><img src="../assets/trainable-mark-dark.png" alt="" /><span>TRAINABLE</span></a>
-      <span class="product-name">Coach workspace</span>
+      <span class="product-name">Coach desk</span>
       <div class="top-actions"><span id="account-name"></span><button id="sign-out" class="quiet" type="button" hidden>Sign out</button></div>
     </header>
 
     <main id="auth-page" class="auth-page">
+      <section class="auth-intro" aria-label="About Trainable Coach">
+        <p class="eyebrow">TRAINABLE / COACH</p>
+        <h1>Better decisions,<br><em>made together.</em></h1>
+        <p>Your training, your coach, and a useful assistant in one place. Build the week, keep the context, and make every change with a human in control.</p>
+        <div class="auth-steps"><span>01 &nbsp; Review the athlete</span><span>02 &nbsp; Shape the week</span><span>03 &nbsp; Approve the plan</span></div>
+      </section>
       <section class="auth-card" aria-labelledby="auth-title">
-        <p class="eyebrow">A HUMAN COACH, BETTER INFORMED</p>
-        <h1 id="auth-title">Make the week together.</h1>
-        <p>Sign in with your Trainable account to see your training. When you invite a coach, they can work with the same live plan.</p>
+        <p class="eyebrow">WELCOME BACK</p>
+        <h2 id="auth-title">Open your coach desk</h2>
+        <p>Use your Trainable account. Your own training appears first; you can invite your coach from inside.</p>
         <div class="social-actions"><button id="google-sign-in" class="social" type="button">Continue with Google</button></div>
         <div class="divider"><span>or sign in with email</span></div>
         <form id="sign-in-form" novalidate>
@@ -31,16 +37,17 @@
           <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required aria-describedby="password-error" /><p id="password-error" class="field-error" role="alert" hidden></p>
           <button class="primary full" type="submit">Sign in</button>
         </form>
+        <button id="retry-workspace" class="secondary full" type="button" hidden>Try loading my coach desk again</button>
         <p id="auth-status" class="status" role="status"></p>
       </section>
     </main>
 
     <main id="workspace" class="workspace" hidden>
-      <div class="workspace-head"><div><p class="eyebrow">COACH WORKSPACE</p><h1>The team</h1><p class="subtle">Training decisions stay with the coach and athlete. The assistant prepares options.</p></div><div class="head-actions"><button id="invite-coach" class="secondary" type="button">Invite my coach</button><button id="join-team" class="secondary" type="button">Use invite code</button></div></div>
+      <div class="workspace-head"><div><p class="eyebrow">TRAINABLE / COACH DESK</p><h1>Your athletes<span class="heading-period">.</span></h1><p class="subtle">A clear view of each athlete and the next training decision.</p></div><div class="head-actions"><button id="invite-coach" class="secondary" type="button">Invite a coach</button><button id="join-team" class="secondary" type="button">Join a team</button></div></div>
       <p id="global-status" class="status" role="status"></p>
       <div class="split-pane">
-        <aside class="roster-pane" aria-labelledby="roster-title"><div class="pane-heading"><h2 id="roster-title">Athletes</h2><span id="roster-count"></span></div><div id="roster-list" class="roster-list"></div><div class="roster-foot">Your own training appears here while you set up coach access.</div></aside>
-        <section id="athlete-pane" class="athlete-pane" aria-live="polite"></section>
+        <aside class="roster-pane" aria-labelledby="roster-title"><div class="pane-heading"><h2 id="roster-title">Roster</h2><span id="roster-count"></span></div><div class="roster-search"><label for="roster-query">Find an athlete</label><input id="roster-query" type="search" placeholder="Search by name" autocomplete="off" /></div><div id="roster-list" class="roster-list" aria-label="Athletes"></div><div class="roster-foot">Select an athlete to review their week and coaching context.</div></aside>
+        <section id="athlete-pane" class="athlete-pane" aria-live="polite" tabindex="-1"></section>
       </div>
     </main>
 

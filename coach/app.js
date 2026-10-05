@@ -9,7 +9,8 @@ const ZONES = [['recovery', 'Z1 · Recovery'], ['endurance', 'Z2 · Endurance'],
 const TYPES = [['warmup', 'Warm-up'], ['work', 'Work'], ['recovery', 'Recovery'], ['cooldown', 'Cool-down']];
 const state = { roster: [], athleteId: null, athlete: null, builder: null, meeting: null, weekDraft: null, weekSelection: null,
   sharedWith: [], trigger: null, editorDirty: false, noteToArchive: null, weekReset: null, resetTrigger: null,
-  weekGenerating: false, weekPublishing: false, weekResetting: false, noteSaving: false };
+  weekGenerating: false, weekPublishing: false, weekResetting: false, noteSaving: false, mobileDetailOpen: false, athleteRequest: 0,
+  calendarWeek: null, calendarDay: null };
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const title = (value) => String(value ?? '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
@@ -19,41 +20,68 @@ const trainingMinutesLabel = (n) => n ? minutesLabel(n) : '0m';
 const localDate = () => { const d = new Date(); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); };
 const currentWeek = () => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); };
 
-function session() { try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; } }
-function saveSession(value) { sessionStorage.setItem(SESSION_KEY, JSON.stringify(value)); }
+function session() {
+  try {
+    const saved = localStorage.getItem(SESSION_KEY);
+    if (saved) return JSON.parse(saved);
+    const previous = sessionStorage.getItem(SESSION_KEY);
+    if (!previous) return null;
+    const value = JSON.parse(previous); saveSession(value); return value;
+  } catch { return null; }
+}
+function saveSession(value) {
+  const expires = Number(value.expires_at) || Math.floor(Date.now() / 1000) + Number(value.expires_in || 3600);
+  const saved = JSON.stringify({ ...value, expires_at: expires });
+  try { localStorage.setItem(SESSION_KEY, saved); sessionStorage.removeItem(SESSION_KEY); }
+  catch { sessionStorage.setItem(SESSION_KEY, saved); }
+}
+function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } sessionStorage.removeItem(SESSION_KEY); }
 function setStatus(message, isError = false, area = '#global-status') {
   const node = $(area); if (!node) return; node.textContent = message; node.classList.toggle('is-error', isError);
 }
 async function authRequest(path, options = {}) {
   const response = await fetch(API + '/auth/v1/' + path, { ...options, headers: { apikey: KEY, ...options.headers } });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.msg || data.error_description || data.message || data.error || 'Could not sign in.');
+  if (!response.ok) { const error = new Error(data.msg || data.error_description || data.message || data.error || 'Could not sign in.'); error.status = response.status; throw error; }
   return data;
+}
+let refreshPending = null;
+function refreshSession(current) {
+  if (!refreshPending) refreshPending = authRequest('token?grant_type=refresh_token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: current.refresh_token }) })
+    .then((updated) => { const next = { ...updated, user: updated.user || current.user }; saveSession(next); return session() || next; })
+    .catch((error) => { if (error.status === 400 || error.status === 401) error.authInvalid = true; throw error; })
+    .finally(() => { refreshPending = null; });
+  return refreshPending;
 }
 async function token() {
   let current = session();
-  if (!current?.access_token || !current?.refresh_token) throw new Error('Please sign in again.');
+  if (!current?.access_token || !current?.refresh_token) { const error = new Error('Please sign in again.'); error.authInvalid = true; throw error; }
   if (!current.expires_at || current.expires_at <= Math.floor(Date.now() / 1000) + 60) {
-    const updated = await authRequest('token?grant_type=refresh_token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: current.refresh_token }) });
-    current = { ...updated, user: updated.user || current.user }; saveSession(current);
+    current = await refreshSession(current);
   }
   return current.access_token;
 }
 async function portal(action, payload = {}) {
-  const response = await fetch(API + '/functions/v1/coach-portal', { method: 'POST',
-    headers: { apikey: KEY, Authorization: 'Bearer ' + await token(), 'Content-Type': 'application/json' },
+  const request = (accessToken) => fetch(API + '/functions/v1/coach-portal', { method: 'POST',
+    headers: { apikey: KEY, Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...payload }) });
+  let response = await request(await token());
+  if (response.status === 401 && session()?.refresh_token) {
+    const updated = await refreshSession(session());
+    response = await request(updated.access_token);
+  }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || 'Trainable could not complete that action.');
+  if (!response.ok) { const error = new Error(data.error || 'Trainable could not complete that action.'); error.status = response.status; error.authInvalid = response.status === 401; throw error; }
   return data;
 }
 function showAuth(message = '') {
   $('#auth-page').hidden = false; $('#workspace').hidden = true; $('#sign-out').hidden = true;
-  $('#account-name').textContent = ''; setStatus(message, Boolean(message), '#auth-status');
+  $('#workspace').classList.remove('mobile-detail-open'); state.mobileDetailOpen = false;
+  $('#account-name').textContent = ''; $('#retry-workspace').hidden = true; setStatus(message, Boolean(message), '#auth-status');
 }
 function showWorkspace(email) {
   $('#auth-page').hidden = true; $('#workspace').hidden = false; $('#sign-out').hidden = false;
-  $('#account-name').textContent = email || '';
+  $('#retry-workspace').hidden = true; $('#account-name').textContent = email || '';
 }
 function showFieldError(id, message) {
   const input = $('#' + id); const error = $('#' + id + '-error');
@@ -74,7 +102,7 @@ async function handleOAuth() {
   try {
     const user = await authRequest('user', { headers: { Authorization: 'Bearer ' + access_token } });
     saveSession({ access_token, refresh_token, user, expires_at: Math.floor(Date.now() / 1000) + Number(hash.get('expires_in') || 3600) });
-    await loadWorkspace();
+    await resumeWorkspace();
   } catch (error) { showAuth(error.message); }
   return true;
 }
@@ -82,53 +110,99 @@ async function loadWorkspace() {
   const result = await portal('bootstrap');
   state.roster = result.roster || []; state.sharedWith = result.shared_with || [];
   showWorkspace(result.email || session()?.user?.email);
-  renderRoster();
   const route = location.hash.slice(1).split('/');
   const wanted = ['athlete', 'builder', 'meeting', 'week', 'note'].includes(route[0]) ? route[1] : null;
-  await selectAthlete(state.roster.some((p) => p.id === wanted) ? wanted : state.athleteId && state.roster.some((p) => p.id === state.athleteId) ? state.athleteId : state.roster[0]?.id);
+  const validWanted = state.roster.some((p) => p.id === wanted) ? wanted : null;
+  const openDetail = Boolean(validWanted) || state.roster.length === 1;
+  state.mobileDetailOpen = openDetail;
+  $('#workspace').classList.toggle('mobile-detail-open', openDetail);
+  renderRoster();
+  await selectAthlete(validWanted || (state.roster.some((p) => p.id === state.athleteId) ? state.athleteId : state.roster[0]?.id), { updateRoute: openDetail || !matchMedia('(max-width: 767.98px)').matches });
   if (route[0] === 'builder' && wanted === state.athleteId) openBuilder();
   if (route[0] === 'meeting' && wanted === state.athleteId) openMeeting();
   if (route[0] === 'week' && wanted === state.athleteId) openWeek();
   if (route[0] === 'note' && wanted === state.athleteId) openNote();
 }
 function renderRoster() {
-  $('#roster-count').textContent = String(state.roster.length);
-  $('#roster-list').innerHTML = state.roster.map((p) => `<button type="button" class="roster-item ${p.id === state.athleteId ? 'active' : ''}" data-athlete="${safe(p.id)}" aria-current="${p.id === state.athleteId ? 'page' : 'false'}"><strong>${safe(p.display_name || (p.is_self ? 'Your training' : 'Athlete'))}</strong><small>${p.is_self ? 'Your account' : 'Shared with you'} · ${safe(title(p.primary_sport || 'training'))}</small></button>`).join('');
+  const query = $('#roster-query').value.trim().toLocaleLowerCase();
+  const filtered = state.roster.filter((p) => (p.display_name || (p.is_self ? 'Your training' : 'Athlete')).toLocaleLowerCase().includes(query));
+  $('#roster-count').textContent = `${state.roster.length} ${state.roster.length === 1 ? 'athlete' : 'athletes'}`;
+  $('#roster-list').innerHTML = filtered.length ? filtered.map((p) => {
+    const name = p.display_name || (p.is_self ? 'Your training' : 'Athlete');
+    const initials = name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('');
+    return `<button type="button" class="roster-item ${p.id === state.athleteId ? 'active' : ''}" data-athlete="${safe(p.id)}" aria-current="${p.id === state.athleteId ? 'page' : 'false'}"><span class="roster-avatar" aria-hidden="true">${safe(initials)}</span><span class="roster-copy"><strong>${safe(name)}</strong><small>${p.is_self ? 'Your training' : 'Coach access'} · ${safe(title(p.primary_sport || 'training'))}</small></span><span class="roster-arrow" aria-hidden="true">›</span></button>`;
+  }).join('') : `<div class="roster-empty"><strong>No athletes found</strong><p>Try another name or clear your search.</p><button type="button" class="secondary small-button" data-clear-roster>Clear search</button></div>`;
 }
-async function selectAthlete(id) {
+async function selectAthlete(id, options = {}) {
   if (!id) return;
+  const request = ++state.athleteRequest;
+  if (id !== state.athleteId) { state.calendarWeek = currentWeek(); state.calendarDay = null; }
+  if (options.openDetail != null) {
+    state.mobileDetailOpen = options.openDetail;
+    $('#workspace').classList.toggle('mobile-detail-open', state.mobileDetailOpen);
+  }
   state.athleteId = id; renderRoster(); $('#athlete-pane').innerHTML = '<p class="list-empty">Loading the training week…</p>';
   try {
-    state.athlete = await portal('read_athlete', { athlete_id: id });
-    if (location.hash !== '#athlete/' + id) history.replaceState(null, '', '#athlete/' + id);
+    const athlete = await portal('read_athlete', { athlete_id: id });
+    if (request !== state.athleteRequest) return;
+    state.athlete = athlete;
+    if (options.updateRoute !== false && location.hash !== '#athlete/' + id) history[options.pushRoute ? 'pushState' : 'replaceState'](null, '', '#athlete/' + id);
     renderAthlete();
-  } catch (error) { $('#athlete-pane').innerHTML = '<p class="list-empty">' + safe(error.message) + '</p>'; }
+  } catch (error) { if (request === state.athleteRequest) $('#athlete-pane').innerHTML = '<p class="list-empty">Could not load this athlete. ' + safe(error.message) + '</p>'; }
 }
 function renderAthlete() {
   const data = state.athlete; if (!data) return;
   const p = data.profile || {}; const isSelf = state.roster.find((r) => r.id === state.athleteId)?.is_self;
-  const week = currentWeek();
+  const week = state.calendarWeek || currentWeek(); state.calendarWeek = week;
   const plan = data.plans.find((x) => x.week_start_date === week);
   const workouts = data.workouts.filter((x) => x.plan_id === plan?.id);
   const name = p.display_name || (isSelf ? 'Your training' : 'Athlete');
   const readiness = data.readiness;
   const metrics = data.metrics;
+  const checkin = readiness?.checkin_energy != null ? ['Energy check-in', readiness.checkin_energy + ' / 5', 'Self reported · ' + dateLabel(readiness.metric_date)]
+    : readiness?.hrv_ms != null ? ['HRV', Math.round(readiness.hrv_ms) + ' ms', 'As of ' + dateLabel(readiness.metric_date)]
+    : ['Recent check-in', '—', 'No check-in yet'];
   const cells = [
-    ['Form', metrics?.tsb == null ? '—' : Math.round(metrics.tsb), metrics?.metric_date ? 'As of ' + dateLabel(metrics.metric_date) : 'No load data yet'],
-    ['Fitness', metrics?.ctl == null ? '—' : Math.round(metrics.ctl), 'Chronic load'],
+    ['Load balance', metrics?.tsb == null ? '—' : Math.round(metrics.tsb), metrics?.metric_date ? 'CTL minus ATL · ' + dateLabel(metrics.metric_date) : 'No load data yet'],
+    ['Chronic load', metrics?.ctl == null ? '—' : Math.round(metrics.ctl), '42-day workload model'],
     ['FTP', data.zones?.ftp_watts ? Math.round(data.zones.ftp_watts) + ' W' : '—', 'Current cycling threshold'],
-    ['Recovery', readiness?.checkin_energy ? readiness.checkin_energy + ' / 5' : readiness?.hrv_ms ? Math.round(readiness.hrv_ms) + ' ms' : '—', readiness?.metric_date ? 'As of ' + dateLabel(readiness.metric_date) : 'No check-in yet'],
+    checkin,
   ];
-  const weekRows = ORDER.map((day) => {
-    const w = workouts.find((x) => x.day_of_week === day);
-    return `<div class="week-row ${w ? '' : 'empty'}"><span class="day-label">${DAYS[day]}</span><div><div class="workout-title">${safe(w?.headline || w?.description?.split('.')[0] || 'Open day')}</div><div class="workout-sub">${w ? safe(title(w.workout_type)) + (w.completed ? ' · Completed' : '') : 'No session planned'}</div></div><div class="workout-meta">${w ? safe(minutesLabel(w.target_duration_min)) : '—'}<span class="${w?.prescription_source === 'human_coach' ? 'coach-owned' : ''}">${w?.prescription_source === 'human_coach' ? 'Coach' : w ? 'Trainable' : ''}</span></div></div>`;
+  const today = localDate();
+  if (state.calendarDay == null) state.calendarDay = week === currentWeek() ? new Date().getDay() : 1;
+  const dayDate = (day) => {
+    const d = new Date(week + 'T12:00:00'); d.setDate(d.getDate() + (day + 6) % 7);
+    return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+  };
+  const calendarDays = ORDER.map((day) => {
+    const date = dayDate(day); const dayWorkouts = workouts.filter((w) => w.day_of_week === day);
+    const label = `${DAYS[day]} ${Number(date.slice(-2))}`;
+    const sessions = dayWorkouts.map((w) => `<span class="calendar-session ${w.prescription_source === 'human_coach' ? 'coach-owned' : ''}"><strong>${safe(w.headline || title(w.workout_type))}</strong><small>${safe(minutesLabel(w.target_duration_min))}${w.completed ? ' · Done' : ''}</small></span>`).join('');
+    return `<button type="button" class="calendar-day ${state.calendarDay === day ? 'selected' : ''} ${date === today ? 'today' : ''} ${dayWorkouts.length ? 'has-workout' : 'open-day'}" data-calendar-day="${day}" data-calendar-empty="${dayWorkouts.length ? 'false' : 'true'}" data-calendar-date="${date}" aria-pressed="${state.calendarDay === day}" aria-label="${safe(label)}: ${dayWorkouts.length ? dayWorkouts.length + (dayWorkouts.length === 1 ? ' workout' : ' workouts') : date < today ? 'no workout' : 'add a workout'}"><span class="calendar-date"><span>${DAYS[day]}</span><strong>${Number(date.slice(-2))}</strong></span>${sessions || `<span class="calendar-open">${date < today ? 'No session' : '＋ Add workout'}</span>`}</button>`;
   }).join('');
+  const selectedDate = dayDate(state.calendarDay);
+  const selectedWorkouts = workouts.filter((w) => w.day_of_week === state.calendarDay);
+  const selectedDayRows = selectedWorkouts.length ? selectedWorkouts.map((w) => `<article class="selected-workout"><div><p class="eyebrow">${w.prescription_source === 'human_coach' ? 'COACH PRESCRIPTION' : 'TRAINABLE PLAN'} · ${w.completed ? 'COMPLETED' : 'PLANNED'}</p><h4>${safe(w.headline || title(w.workout_type))}</h4><p>${safe(w.description || 'No athlete instructions added.')}</p></div><strong>${safe(minutesLabel(w.target_duration_min))}</strong></article>`).join('') : `<p class="selected-empty">No session planned for ${safe(DAYS[state.calendarDay])}.</p>`;
+  const canAddDay = selectedDate >= today && week === currentWeek();
   const meetingRows = data.meetings.length ? data.meetings.map((m, mi) => `<div class="meeting-row"><strong>${safe(dateLabel(m.happened_at))} · Coach call</strong><p>${safe(m.summary)}</p>${m.meeting_url ? '<small>Google Meet linked</small>' : ''}<div class="meeting-changes">${(m.proposed_changes || []).map((c, ci) => `<button type="button" data-change="${mi}:${ci}">Draft workout from: ${safe(c)}</button>`).join('')}</div></div>`).join('') : '<div class="list-empty"><strong>No coach calls yet</strong><p>Review a Google Meet transcript to turn agreed changes into a clear plan.</p><button type="button" class="secondary small-button" data-action="new-meeting">Add call notes</button></div>';
   const activityRows = data.activities.length ? data.activities.slice(0, 4).map((a) => `<div class="activity-row"><strong>${safe(title(a.sport_type))} · ${safe(minutesLabel(Math.round(a.duration_s / 60)))}</strong><br><small>${safe(dateLabel(a.start_date))}${a.raw_tss ? ' · ' + Math.round(a.raw_tss) + ' TSS' : ''}</small></div>`).join('') : '<div class="list-empty">Recent activities will appear after a training source syncs.</div>';
   const noteKinds = { observation: 'Training response', preference: 'Preference', goal: 'Goal', constraint: 'Constraint' };
   const noteRows = data.coach_notes?.length ? data.coach_notes.map((n) => `<div class="note-row"><div><small>${safe(noteKinds[n.kind] || 'Note')} · ${n.author_id === state.athleteId ? 'Athlete' : 'Coach'} · ${safe(dateLabel(n.created_at))}</small><p>${safe(n.body)}</p></div>${isSelf || n.author_id === session()?.user?.id ? `<button type="button" class="quiet small-button" data-archive-note="${safe(n.id)}">Archive</button>` : ''}</div>`).join('') : '<div class="list-empty"><strong>No athlete notes yet</strong><p>Add a training response, goal or preference so the assistant can consider it when drafting.</p><button type="button" class="secondary small-button" data-action="new-note">Add athlete note</button></div>';
-  $('#athlete-pane').innerHTML = `<div class="athlete-top"><div><p class="eyebrow">${isSelf ? 'YOUR ATHLETE PROFILE' : 'SHARED ATHLETE'}</p><h2>${safe(name)}</h2><p>${safe(title(p.primary_sport || 'Training'))} · Week of ${safe(dateLabel(week))}</p></div><div class="athlete-actions"><button type="button" class="secondary small-button" data-action="new-note">Add athlete note</button><button type="button" class="secondary small-button" data-action="new-meeting">Add call notes</button><button type="button" class="secondary small-button" data-action="new-workout">Create workout</button><button type="button" class="primary small-button" data-action="build-week">Build full week</button></div></div><div class="metrics">${cells.map((c) => `<div class="metric"><span>${safe(c[0])}</span><strong>${safe(c[1])}</strong><small>${safe(c[2])}</small></div>`).join('')}</div><div class="section-head"><h3>This week</h3><small>${safe(dateLabel(week))}–${safe(dateLabel(new Date(new Date(week + 'T12:00:00Z').getTime() + 6 * 86400000).toISOString()))}</small></div><div class="week-list">${weekRows}</div><p class="foot-note">Coach prescriptions are protected when Trainable replans open days. A saved workout also appears in the athlete app.</p><div class="two-column"><section><div class="section-head"><h3>Recent training</h3></div><div class="activity-list">${activityRows}</div></section><section><div class="section-head"><h3>Coach calls</h3></div><div class="meeting-list">${meetingRows}</div></section></div><section class="profile-notes"><div class="section-head"><h3>Athlete notes</h3>${data.coach_notes?.length ? '<button type="button" class="quiet small-button" data-action="new-note">Add note</button>' : ''}</div><p class="helper">Shared with this athlete and their connected coach. The assistant uses these only when relevant and AI sharing is allowed.</p><div class="meeting-list">${noteRows}</div></section>`;
-  $('#athlete-pane .athlete-actions').insertAdjacentHTML('afterbegin', '<button type="button" class="secondary small-button" data-action="review-week">Review one day</button>');
+  const plannedMinutes = workouts.reduce((sum, workout) => sum + (Number(workout.target_duration_min) || 0), 0);
+  const weekEnd = dateLabel(new Date(new Date(week + 'T12:00:00Z').getTime() + 6 * 86400000).toISOString());
+  $('#athlete-pane').innerHTML = `
+    <button type="button" class="mobile-back quiet" data-action="back-to-roster">← All athletes</button>
+    <div class="athlete-top">
+      <div class="athlete-identity"><p class="eyebrow">${isSelf ? 'YOUR TRAINING' : 'ATHLETE PROFILE'} / ${safe(title(p.primary_sport || 'Training')).toUpperCase()}</p><h2>${safe(name)}<span class="heading-period">.</span></h2><p>Training week · ${safe(dateLabel(week))}–${safe(weekEnd)}</p></div>
+      <div class="athlete-actions"><button type="button" class="primary" data-action="build-week">Build full week</button>${week === currentWeek() ? '<button type="button" class="secondary" data-action="new-workout">Create workout</button><button type="button" class="quiet" data-action="review-week">Review one day</button>' : '<button type="button" class="secondary" data-action="build-week">Edit next week</button>'}</div>
+    </div>
+    <div class="decision-strip"><span class="decision-marker" aria-hidden="true"></span><div><p class="eyebrow">COACH DECISION</p><strong>${workouts.length ? 'Review the plan before the next change.' : 'Start with a safe baseline week.'}</strong><p>${workouts.length ? 'Use the week below to check what is already planned. Coach sessions stay protected when Trainable replans open days.' : 'The assistant can prepare a conservative draft. You and your coach review every day before it reaches the athlete.'}</p></div></div>
+    <div class="metrics" aria-label="Athlete training measures">${cells.map((c) => `<div class="metric"><span>${safe(c[0])}</span><strong>${safe(c[1])}</strong><small>${safe(c[2])}</small></div>`).join('')}</div>
+    <section class="week-section"><div class="section-head"><div><p class="eyebrow">THE PLAN</p><h3>Training calendar</h3></div><div class="calendar-controls"><button type="button" class="secondary small-button" data-week-shift="-1" aria-label="Previous week" ${week === currentWeek() ? 'disabled' : ''}>←</button><span>${week === currentWeek() ? 'This week' : 'Next week'} · ${safe(dateLabel(week))}–${safe(weekEnd)}</span><button type="button" class="secondary small-button" data-week-shift="1" aria-label="Next week" ${week === nextWeek() ? 'disabled' : ''}>→</button></div></div><div class="week-summary"><div><strong>${safe(trainingMinutesLabel(plannedMinutes))}</strong><span>planned</span></div><div><strong>${workouts.length}</strong><span>${workouts.length === 1 ? 'session' : 'sessions'}</span></div><div><strong>${Math.max(0, 7 - new Set(workouts.map((w) => w.day_of_week)).size)}</strong><span>days without sessions</span></div></div><div class="calendar-grid" role="group" aria-label="Week of ${safe(dateLabel(week))}">${calendarDays}</div><div class="selected-day"><div class="selected-day-heading"><div><p class="eyebrow">SELECTED DAY</p><h4>${safe(DAYS[state.calendarDay])}, ${safe(dateLabel(selectedDate))}</h4></div>${canAddDay ? `<button type="button" class="secondary small-button" data-add-calendar-day="${state.calendarDay}">Add workout</button>` : week === nextWeek() ? '<button type="button" class="secondary small-button" data-action="build-week">Plan next week</button>' : ''}</div>${selectedDayRows}</div><p class="foot-note">A saved workout also appears in the athlete app.</p></section>
+    <div class="athlete-content"><div class="planning-column"><section class="recent-section"><div class="section-head"><div><p class="eyebrow">THE EVIDENCE</p><h3>Recent training</h3></div></div><div class="activity-list">${activityRows}</div></section></div>
+      <div class="context-column"><section class="profile-notes"><div class="section-head"><div><p class="eyebrow">WHAT THE COACH KNOWS</p><h3>Athlete notes</h3></div><button type="button" class="quiet small-button" data-action="new-note">Add note</button></div><p class="helper">Record goals, preferences and training responses. The assistant can use relevant notes when AI sharing is allowed.</p><div class="meeting-list">${noteRows}</div></section>
+      <section class="calls-section"><div class="section-head"><div><p class="eyebrow">FROM THE CONVERSATION</p><h3>Coach calls</h3></div><button type="button" class="quiet small-button" data-action="new-meeting">Add call notes</button></div><div class="meeting-list">${meetingRows}</div></section></div>
+    </div>`;
 }
 function openDrawer(kicker, titleText, markup) {
   state.trigger = document.activeElement;
@@ -268,7 +342,7 @@ function renderWeekEditor() {
   openEditor('week', 'WEEK BUILDER', 'Build the full week', `<p>Build a conservative starting week, then make the coaching decisions together.</p>${selector}${focus}<p id="week-status" class="status" role="status"></p>${content}${resetAction}`);
   if (d) updateWeekTotal();
 }
-function openWeek() { state.weekDraft = null; state.weekSelection = currentWeek(); state.editorDirty = false; renderWeekEditor(); }
+function openWeek(weekStart = currentWeek()) { state.weekDraft = null; state.weekSelection = weekStart; state.editorDirty = false; renderWeekEditor(); }
 function rerenderWeek() {
   const y = window.scrollY;
   const openDays = [...document.querySelectorAll('[data-week-day] details[open]')]
@@ -489,15 +563,48 @@ for (const [id, provider] of [['google-sign-in', 'google']]) {
 }
 $('#sign-out').addEventListener('click', async () => {
   try { await authRequest('logout', { method: 'POST', headers: { Authorization: 'Bearer ' + await token() } }); } catch { /* Clear the local session even if the server is unavailable. */ }
-  sessionStorage.removeItem(SESSION_KEY); state.roster = []; state.athlete = null; state.athleteId = null; showAuth('');
+  clearSession(); state.roster = []; state.athlete = null; state.athleteId = null; showAuth('');
 });
-$('#roster-list').addEventListener('click', (event) => { const b = event.target.closest('[data-athlete]'); if (b) selectAthlete(b.dataset.athlete); });
+$('#retry-workspace').addEventListener('click', resumeWorkspace);
+addEventListener('storage', (event) => { if (event.key === SESSION_KEY && !event.newValue && !$('#workspace').hidden) { state.roster = []; state.athlete = null; state.athleteId = null; showAuth('Signed out in another tab.'); } });
+$('#roster-query').addEventListener('input', renderRoster);
+$('#roster-list').addEventListener('click', (event) => {
+  if (event.target.closest('[data-clear-roster]')) { $('#roster-query').value = ''; renderRoster(); $('#roster-query').focus(); return; }
+  const button = event.target.closest('[data-athlete]');
+  if (button) { selectAthlete(button.dataset.athlete, { openDetail: true, pushRoute: true }); if (matchMedia('(max-width: 767.98px)').matches) scrollTo(0, 0); }
+});
+$('#roster-list').addEventListener('keydown', (event) => {
+  if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
+  const items = [...$('#roster-list').querySelectorAll('[data-athlete]')];
+  const index = items.indexOf(document.activeElement);
+  if (index < 0) return;
+  if (event.key === 'Enter') { event.preventDefault(); $('#athlete-pane').focus(); return; }
+  event.preventDefault(); items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+});
+addEventListener('popstate', () => {
+  const route = location.hash.slice(1).split('/');
+  if (route[0] === 'team' || !route[0]) { state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); return; }
+  if (route[0] === 'athlete' && state.roster.some((p) => p.id === route[1])) selectAthlete(route[1], { openDetail: true, updateRoute: false });
+});
 $('#athlete-pane').addEventListener('click', (event) => {
+  const shift = event.target.closest('[data-week-shift]');
+  if (shift) { state.calendarWeek = Number(shift.dataset.weekShift) > 0 ? nextWeek() : currentWeek(); state.calendarDay = null; renderAthlete(); $('#athlete-pane [data-week-shift="' + shift.dataset.weekShift + '"]')?.focus(); return; }
+  const calendarDay = event.target.closest('[data-calendar-day]');
+  if (calendarDay) {
+    state.calendarDay = Number(calendarDay.dataset.calendarDay);
+    if (calendarDay.dataset.calendarEmpty === 'true' && calendarDay.dataset.calendarDate >= localDate()) {
+      if (state.calendarWeek === currentWeek()) openBuilder('', state.calendarDay); else openWeek(state.calendarWeek);
+    } else { renderAthlete(); $('#athlete-pane [data-calendar-day="' + state.calendarDay + '"]')?.focus(); }
+    return;
+  }
+  const addDay = event.target.closest('[data-add-calendar-day]');
+  if (addDay) { openBuilder('', Number(addDay.dataset.addCalendarDay)); return; }
   const action = event.target.closest('[data-action]')?.dataset.action;
+  if (action === 'back-to-roster') { state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); history.pushState(null, '', '#team'); $('#roster-query').focus(); scrollTo(0, 0); return; }
   if (action === 'new-workout') openBuilder();
   if (action === 'new-meeting') openMeeting();
   if (action === 'new-note') openNote();
-  if (action === 'build-week') openWeek();
+  if (action === 'build-week') openWeek(state.calendarWeek || currentWeek());
   if (action === 'review-week') reviewWeek();
   const noteId = event.target.closest('[data-archive-note]')?.dataset.archiveNote;
   if (noteId) { state.noteToArchive = noteId; $('#archive-note-dialog').showModal(); $('#keep-note').focus(); }
@@ -633,6 +740,14 @@ $('#drawer-body').addEventListener('change', (event) => {
     state.editorDirty = true; rerenderWeek();
   }
 });
+async function resumeWorkspace() {
+  try { await loadWorkspace(); return true; }
+  catch (error) {
+    if (error.authInvalid) { clearSession(); showAuth('Your sign-in expired. Please sign in again.'); }
+    else { showAuth('Your sign-in is saved, but Coach could not load right now. Check your connection and try again.'); $('#retry-workspace').hidden = false; }
+    return false;
+  }
+}
 async function start() {
   if (location.protocol === 'file:') {
     showAuth('');
@@ -643,9 +758,7 @@ async function start() {
     return;
   }
   if (await handleOAuth()) return;
-  if (session()?.access_token) {
-    try { await loadWorkspace(); return; } catch { sessionStorage.removeItem(SESSION_KEY); }
-  }
+  if (session()?.access_token) { await resumeWorkspace(); return; }
   showAuth('');
 }
 start();
