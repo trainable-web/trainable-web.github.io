@@ -155,6 +155,8 @@ function renderAttention() {
   const planning = open.filter((item) => item.priority === 'planning');
   const gaps = open.filter((item) => item.priority === 'data');
   $('#attention-summary').innerHTML = `<div><strong>${data.athlete_count}</strong><span>${data.athlete_count === 1 ? 'athlete' : 'athletes'} accessible</span></div><div><strong>${review.length}</strong><span>check-ins to review</span></div><div><strong>${planning.length}</strong><span>plans to prepare</span></div><div><strong>${gaps.length}</strong><span>data gaps</span></div>`;
+  $('#attention-coverage').hidden = !data.activity_coverage_limited;
+  $('#attention-coverage').textContent = data.activity_coverage_limited ? 'Activity volume exceeded this quick review. Data-gap alerts were suppressed; open an athlete for a closer look.' : '';
   const filter = state.attentionFilter;
   document.querySelectorAll('[data-attention-filter]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.attentionFilter === filter)));
   const shown = data.items.filter((item) => filter === 'all' || (filter === 'reviewed' ? item.reviewed_at : !item.reviewed_at));
@@ -631,6 +633,7 @@ $('#attention-list').addEventListener('click', async (event) => {
       const item = state.attention.items.find((row) => row.id === review.dataset.attentionReview);
       if (item) item.reviewed_at = new Date().toISOString();
       renderAttention();
+      ($('#attention-list [data-attention-review]') || $('#attention-list [data-attention-athlete]') || $('[data-attention-filter="reviewed"]')).focus();
     } catch (error) { review.disabled = false; setStatus(error.message, true); }
     return;
   }
