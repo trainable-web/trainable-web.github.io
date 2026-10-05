@@ -230,7 +230,7 @@ function renderAthlete() {
   const meetingRows = data.meetings.length ? data.meetings.map((m, mi) => `<div class="meeting-row"><strong>${safe(dateLabel(m.happened_at))} · Coach call</strong><p>${safe(m.summary)}</p>${m.meeting_url ? '<small>Google Meet linked</small>' : ''}<div class="meeting-changes">${(m.proposed_changes || []).map((c, ci) => `<button type="button" data-change="${mi}:${ci}">Draft workout from: ${safe(c)}</button>`).join('')}</div></div>`).join('') : '<div class="list-empty"><strong>No coach calls yet</strong><p>Review a Google Meet transcript to turn agreed changes into a clear plan.</p><button type="button" class="secondary small-button" data-action="new-meeting">Add call notes</button></div>';
   const activityRows = data.activities.length ? data.activities.slice(0, 4).map((a) => `<div class="activity-row"><strong>${safe(title(a.sport_type))} · ${safe(minutesLabel(Math.round(a.duration_s / 60)))}</strong><br><small>${safe(dateLabel(a.start_date))}${a.raw_tss ? ' · ' + Math.round(a.raw_tss) + ' TSS' : ''}</small></div>`).join('') : '<div class="list-empty">Recent activities will appear after a training source syncs.</div>';
   const noteKinds = { observation: 'Training response', preference: 'Preference', goal: 'Goal', constraint: 'Constraint' };
-  const noteRows = data.coach_notes?.length ? data.coach_notes.map((n) => `<div class="note-row"><div><small>${safe(noteKinds[n.kind] || 'Note')} · ${n.author_id === state.athleteId ? 'Athlete' : 'Coach'} · ${safe(dateLabel(n.created_at))}</small><p>${safe(n.body)}</p></div>${isSelf || n.author_id === session()?.user?.id ? `<button type="button" class="quiet small-button" data-archive-note="${safe(n.id)}">Archive</button>` : ''}</div>`).join('') : '<div class="list-empty"><strong>No athlete notes yet</strong><p>Add a training response, goal or preference so the assistant can consider it when drafting.</p><button type="button" class="secondary small-button" data-action="new-note">Add athlete note</button></div>';
+  const noteRows = data.coach_notes?.length ? data.coach_notes.map((n) => `<div class="note-row"><div><small>${safe(noteKinds[n.kind] || 'Note')} · ${n.author_id === state.athleteId ? 'Athlete' : 'Coach'} · ${n.visibility === 'coach_private' ? 'Only you' : 'Shared'} · ${safe(dateLabel(n.created_at))}</small><p>${safe(n.body)}</p></div>${isSelf || n.author_id === session()?.user?.id ? `<button type="button" class="quiet small-button" data-archive-note="${safe(n.id)}">Archive</button>` : ''}</div>`).join('') : '<div class="list-empty"><strong>No athlete notes yet</strong><p>Add a training response, goal or preference so the assistant can consider it when drafting.</p><button type="button" class="secondary small-button" data-action="new-note">Add athlete note</button></div>';
   const plannedMinutes = workouts.reduce((sum, workout) => sum + (Number(workout.target_duration_min) || 0), 0);
   const weekEnd = dateLabel(new Date(new Date(week + 'T12:00:00Z').getTime() + 6 * 86400000).toISOString());
   $('#athlete-pane').innerHTML = `
@@ -489,7 +489,10 @@ async function publishWeek() {
 }
 function openNote() {
   state.editorDirty = false;
-  openEditor('note', 'ATHLETE CONTEXT', 'Add an athlete note', `<p>Record something useful for planning. The athlete and their connected coach can see this note. The assistant may use it when relevant, with the athlete’s AI sharing permission.</p><div class="form-group"><label for="note-kind">Note type</label><select id="note-kind"><option value="observation">Training response</option><option value="preference">Preference</option><option value="goal">Goal</option><option value="constraint">Constraint</option></select></div><div class="form-group"><label for="note-body">What should the coach remember?</label><textarea id="note-body" rows="5" maxlength="500" placeholder="Sprints late in a long Z2 ride tend to feel flat; try them earlier."></textarea><p class="helper">Describe an observation, not a diagnosis. You can archive it when it stops being useful.</p></div><p id="note-error" class="form-error" role="alert"></p><button type="button" class="primary" data-save-note>Save athlete note</button>`);
+  const isSelf = state.roster.find((person) => person.id === state.athleteId)?.is_self;
+  const visibility = isSelf ? '<p class="callout">This note is shared with your connected coach.</p>'
+    : '<div class="form-group"><label for="note-visibility">Who can see this?</label><select id="note-visibility"><option value="coach_private">Only me</option><option value="shared">Athlete and connected coaches</option></select><p class="helper">Private notes stay with you. Shared notes may inform assistant drafts when the athlete allows AI sharing.</p></div>';
+  openEditor('note', 'ATHLETE CONTEXT', 'Add an athlete note', `<p>Record an observation, preference, goal or constraint. Choose who can see it before saving.</p><div class="form-group"><label for="note-kind">Note type</label><select id="note-kind"><option value="observation">Training response</option><option value="preference">Preference</option><option value="goal">Goal</option><option value="constraint">Constraint</option></select></div>${visibility}<div class="form-group"><label for="note-body">What should the coach remember?</label><textarea id="note-body" rows="5" maxlength="500" required aria-describedby="note-error" placeholder="Sprints late in a long Z2 ride tend to feel flat; try them earlier."></textarea><p class="helper">Describe an observation, not a diagnosis. You can archive it when it stops being useful.</p></div><p id="note-error" class="form-error" role="alert"></p><button type="button" class="primary" data-save-note>Save note</button>`);
   $('#note-body').focus();
 }
 async function saveNote() {
@@ -501,8 +504,9 @@ async function saveNote() {
   const button = $('[data-save-note]'); if (button) button.disabled = true;
   $('#note-error').textContent = 'Saving note…';
   try {
-    await portal('add_note', { athlete_id: state.athleteId, kind: $('#note-kind').value, body });
-    closeDrawer(true); await selectAthlete(state.athleteId); setStatus('Athlete note saved.');
+    await portal('add_note', { athlete_id: state.athleteId, kind: $('#note-kind').value,
+      visibility: $('#note-visibility')?.value || 'shared', body });
+    closeDrawer(true); await selectAthlete(state.athleteId); setStatus('Note saved.');
   } catch (error) { $('#note-error').textContent = error.message; }
   finally { state.noteSaving = false; if (button?.isConnected) button.disabled = false; }
 }
@@ -777,7 +781,7 @@ $('#drawer-body').addEventListener('input', (event) => {
   if (event.target.closest('#drawer-body')) { const err = $('#builder-error') || $('#meeting-error') || $('#week-error') || $('#note-error'); if (err) err.textContent = ''; }
 });
 $('#drawer-body').addEventListener('focusout', (event) => {
-  if (event.target.id === 'note-body' && event.target.value.trim().length > 0 && event.target.value.trim().length < 3) {
+  if (event.target.id === 'note-body' && event.target.value.trim().length < 3) {
     event.target.setAttribute('aria-invalid', 'true');
     $('#note-error').textContent = 'Add a few words about this athlete.';
   }
@@ -792,6 +796,9 @@ $('#drawer-body').addEventListener('focusout', (event) => {
       $('#week-error').textContent = 'Each workout block needs 1–180 minutes.';
     }
   }
+});
+$('#drawer-body').addEventListener('focusin', (event) => {
+  if (event.target.id === 'note-body') { event.target.removeAttribute('aria-invalid'); $('#note-error').textContent = ''; }
 });
 $('#drawer-body').addEventListener('change', (event) => {
   if (event.target.id === 'note-kind') state.editorDirty = true;
