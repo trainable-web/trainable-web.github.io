@@ -11,7 +11,7 @@ const TYPES = [['warmup', 'Warm-up'], ['work', 'Work'], ['recovery', 'Recovery']
 const state = { roster: [], athleteId: null, athlete: null, builder: null, meeting: null, weekDraft: null, weekSelection: null,
   sharedWith: [], trigger: null, editorDirty: false, noteToArchive: null, weekReset: null, resetTrigger: null,
   weekGenerating: false, weekPublishing: false, weekResetting: false, noteSaving: false, mobileDetailOpen: false, athleteRequest: 0,
-  calendarWeek: null, calendarDay: null };
+  calendarWeek: null, calendarDay: null, attention: null, attentionFilter: 'open' };
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const title = (value) => String(value ?? '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
@@ -109,17 +109,62 @@ async function loadWorkspace() {
   state.roster = result.roster || []; state.sharedWith = result.shared_with || [];
   showWorkspace(result.email || session()?.user?.email);
   const route = location.hash.slice(1).split('/');
+  renderRoster();
+  if (!route[0] || route[0] === 'attention') { await showAttention(); return; }
+  showAthletes(false, false);
   const wanted = ['athlete', 'builder', 'meeting', 'week', 'note'].includes(route[0]) ? route[1] : null;
   const validWanted = state.roster.some((p) => p.id === wanted) ? wanted : null;
   const openDetail = Boolean(validWanted) || state.roster.length === 1;
   state.mobileDetailOpen = openDetail;
   $('#workspace').classList.toggle('mobile-detail-open', openDetail);
-  renderRoster();
   await selectAthlete(validWanted || (state.roster.some((p) => p.id === state.athleteId) ? state.athleteId : state.roster[0]?.id), { updateRoute: openDetail || !matchMedia('(max-width: 767.98px)').matches });
   if (route[0] === 'builder' && wanted === state.athleteId) openBuilder();
   if (route[0] === 'meeting' && wanted === state.athleteId) openMeeting();
   if (route[0] === 'week' && wanted === state.athleteId) openWeek();
   if (route[0] === 'note' && wanted === state.athleteId) openNote();
+}
+function setWorkspaceView(view) {
+  $('#attention-view').hidden = view !== 'attention';
+  $('.split-pane').hidden = view !== 'athletes';
+  $('#show-attention').setAttribute('aria-current', view === 'attention' ? 'page' : 'false');
+  $('#show-athletes').setAttribute('aria-current', view === 'athletes' ? 'page' : 'false');
+}
+async function showAttention() {
+  state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open');
+  setWorkspaceView('attention');
+  if (location.hash !== '#attention') history.pushState(null, '', '#attention');
+  $('#attention-list').innerHTML = '<div class="attention-empty"><strong>Checking available evidence…</strong><p>Recent check-ins, training data, and next week’s saved plans.</p></div>';
+  try {
+    state.attention = await portal('attention', { client_date: localDate() });
+    renderAttention();
+  } catch (error) {
+    $('#attention-summary').textContent = '';
+    $('#attention-list').innerHTML = `<div class="attention-empty"><strong>Could not load attention</strong><p>${safe(error.message)}</p><button type="button" class="secondary" data-attention-retry>Try again</button></div>`;
+  }
+}
+function showAthletes(updateRoute = true, loadSelection = true) {
+  setWorkspaceView('athletes');
+  if (updateRoute) { state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); }
+  if (updateRoute && location.hash === '#attention') history.pushState(null, '', '#team');
+  if (loadSelection && !state.athlete && state.roster.length) selectAthlete(state.roster[0].id, { updateRoute: false });
+}
+function renderAttention() {
+  const data = state.attention; if (!data) return;
+  const open = data.items.filter((item) => !item.reviewed_at);
+  const review = open.filter((item) => item.priority === 'review');
+  const planning = open.filter((item) => item.priority === 'planning');
+  const gaps = open.filter((item) => item.priority === 'data');
+  $('#attention-summary').innerHTML = `<div><strong>${data.athlete_count}</strong><span>${data.athlete_count === 1 ? 'athlete' : 'athletes'} accessible</span></div><div><strong>${review.length}</strong><span>check-ins to review</span></div><div><strong>${planning.length}</strong><span>plans to prepare</span></div><div><strong>${gaps.length}</strong><span>data gaps</span></div>`;
+  const filter = state.attentionFilter;
+  document.querySelectorAll('[data-attention-filter]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.attentionFilter === filter)));
+  const shown = data.items.filter((item) => filter === 'all' || (filter === 'reviewed' ? item.reviewed_at : !item.reviewed_at));
+  if (!shown.length) {
+    const headline = filter === 'reviewed' ? 'No reviewed items yet' : filter === 'open' ? 'No open items in the available data' : 'No items yet';
+    const detail = filter === 'reviewed' ? 'Items you mark reviewed will appear here.' : 'Review an athlete’s training or connect a data source to expand what Trainable can check.';
+    $('#attention-list').innerHTML = `<div class="attention-empty"><strong>${headline}</strong><p>${detail}</p><button type="button" class="secondary" data-attention-athletes>Review athletes</button></div>`;
+    return;
+  }
+  $('#attention-list').innerHTML = shown.map((item) => `<article class="attention-item ${item.reviewed_at ? 'is-reviewed' : ''}"><div class="attention-item-main"><div class="attention-item-top"><span class="attention-type ${safe(item.priority)}">${safe(item.priority === 'review' ? 'Check-in' : item.priority === 'planning' ? 'Planning' : 'Data gap')}</span><span class="attention-date">${safe(dateLabel(item.observed_at))}</span></div><h3>${safe(item.athlete_name)} · ${safe(item.headline)}</h3><p>${safe(item.explanation)}</p><details><summary>View evidence</summary><ul>${item.evidence.map((line) => `<li>${safe(line)}</li>`).join('')}</ul><small>${item.evidence_kind === 'athlete_reported' ? 'Athlete-reported' : 'Observed'} · ${item.data_quality === 'limited' ? 'Limited data' : 'Direct evidence'}</small></details></div><div class="attention-actions"><button type="button" class="primary small-button" data-attention-athlete="${safe(item.athlete_id)}" data-attention-plan="${item.priority === 'planning'}">${safe(item.next_action)}</button>${item.reviewed_at ? '<span class="attention-reviewed">Reviewed</span>' : `<button type="button" class="quiet small-button" data-attention-review="${safe(item.id)}">Mark reviewed</button>`}</div></article>`).join('');
 }
 function renderRoster() {
   const query = $('#roster-query').value.trim().toLocaleLowerCase();
@@ -139,7 +184,7 @@ async function selectAthlete(id, options = {}) {
     state.mobileDetailOpen = options.openDetail;
     $('#workspace').classList.toggle('mobile-detail-open', state.mobileDetailOpen);
   }
-  state.athleteId = id; renderRoster(); $('#athlete-pane').innerHTML = '<p class="list-empty">Loading the training week…</p>';
+  state.athleteId = id; state.athlete = null; renderRoster(); $('#athlete-pane').innerHTML = '<p class="list-empty">Loading the training week…</p>';
   try {
     const athlete = await portal('read_athlete', { athlete_id: id });
     if (request !== state.athleteRequest) return;
@@ -564,6 +609,35 @@ $('#sign-out').addEventListener('click', async () => {
   clearSession(); state.roster = []; state.athlete = null; state.athleteId = null; showAuth('');
 });
 $('#retry-workspace').addEventListener('click', resumeWorkspace);
+$('#show-attention').addEventListener('click', showAttention);
+$('#show-athletes').addEventListener('click', () => showAthletes());
+$('#refresh-attention').addEventListener('click', showAttention);
+$('.attention-filters').addEventListener('click', (event) => {
+  const filter = event.target.closest('[data-attention-filter]')?.dataset.attentionFilter;
+  if (!filter) return; state.attentionFilter = filter; renderAttention();
+});
+$('#attention-list').addEventListener('click', async (event) => {
+  if (event.target.closest('[data-attention-retry]')) { await showAttention(); return; }
+  if (event.target.closest('[data-attention-athletes]')) { showAthletes(); return; }
+  const review = event.target.closest('[data-attention-review]');
+  if (review) {
+    review.disabled = true;
+    try {
+      await portal('review_attention', { item_id: review.dataset.attentionReview, client_date: localDate() });
+      const item = state.attention.items.find((row) => row.id === review.dataset.attentionReview);
+      if (item) item.reviewed_at = new Date().toISOString();
+      renderAttention();
+    } catch (error) { review.disabled = false; setStatus(error.message, true); }
+    return;
+  }
+  const athlete = event.target.closest('[data-attention-athlete]');
+  if (athlete) {
+    showAthletes(false, false);
+    await selectAthlete(athlete.dataset.attentionAthlete, { openDetail: true, pushRoute: true });
+    if (athlete.dataset.attentionPlan === 'true' && state.athleteId === athlete.dataset.attentionAthlete && state.athlete) openWeek(nextWeek());
+    scrollTo(0, 0);
+  }
+});
 addEventListener('storage', (event) => { if (event.key === SESSION_KEY && !event.newValue && !$('#workspace').hidden) { state.roster = []; state.athlete = null; state.athleteId = null; showAuth('Signed out in another tab.'); } });
 $('#roster-query').addEventListener('input', renderRoster);
 $('#roster-list').addEventListener('click', (event) => {
@@ -581,8 +655,9 @@ $('#roster-list').addEventListener('keydown', (event) => {
 });
 addEventListener('popstate', () => {
   const route = location.hash.slice(1).split('/');
-  if (route[0] === 'team' || !route[0]) { state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); return; }
-  if (route[0] === 'athlete' && state.roster.some((p) => p.id === route[1])) selectAthlete(route[1], { openDetail: true, updateRoute: false });
+  if (route[0] === 'attention') { showAttention(); return; }
+  if (route[0] === 'team' || !route[0]) { showAthletes(false); state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); return; }
+  if (route[0] === 'athlete' && state.roster.some((p) => p.id === route[1])) { showAthletes(false, false); selectAthlete(route[1], { openDetail: true, updateRoute: false }); }
 });
 $('#athlete-pane').addEventListener('click', (event) => {
   const shift = event.target.closest('[data-week-shift]');

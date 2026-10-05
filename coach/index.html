@@ -9,8 +9,8 @@
     <meta name="application-name" content="Trainable Coach" />
     <meta name="apple-mobile-web-app-title" content="Trainable Coach" />
     <link rel="icon" href="../assets/trainable-mark-dark.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=20261005-coach-desk" />
-    <script src="./app.js?v=20261005-session-fallback" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=20261005-attention" />
+    <script src="./app.js?v=20261005-attention" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -43,8 +43,10 @@
     </main>
 
     <main id="workspace" class="workspace" hidden>
-      <div class="workspace-head"><div><p class="eyebrow">TRAINABLE / COACH DESK</p><h1>Your athletes<span class="heading-period">.</span></h1><p class="subtle">A clear view of each athlete and the next training decision.</p></div><div class="head-actions"><button id="invite-coach" class="secondary" type="button">Invite a coach</button><button id="join-team" class="secondary" type="button">Join a team</button></div></div>
+      <div class="workspace-head"><div><p class="eyebrow">TRAINABLE / COACH DESK</p><h1>Your coaching day<span class="heading-period">.</span></h1><p class="subtle">See what needs a decision, then open the athlete behind it.</p></div><div class="head-actions"><button id="invite-coach" class="secondary" type="button">Invite a coach</button><button id="join-team" class="secondary" type="button">Join a team</button></div></div>
+      <nav class="workspace-nav" aria-label="Coach workspace"><button type="button" id="show-attention" class="workspace-nav-item" aria-current="page">Attention</button><button type="button" id="show-athletes" class="workspace-nav-item">Athletes</button></nav>
       <p id="global-status" class="status" role="status"></p>
+      <section id="attention-view" class="attention-view" aria-labelledby="attention-title"><div class="attention-head"><div><p class="eyebrow">TODAY / REVIEW QUEUE</p><h2 id="attention-title">What needs your attention</h2><p>Direct observations from saved training data. Your judgment decides the next step.</p></div><button id="refresh-attention" type="button" class="secondary">Refresh</button></div><div id="attention-summary" class="attention-summary" aria-live="polite"></div><div class="attention-filters" role="group" aria-label="Attention filter"><button type="button" data-attention-filter="open" aria-pressed="true">Open</button><button type="button" data-attention-filter="all" aria-pressed="false">All</button><button type="button" data-attention-filter="reviewed" aria-pressed="false">Reviewed</button></div><div id="attention-list" class="attention-list" aria-live="polite"></div></section>
       <div class="split-pane">
         <aside class="roster-pane" aria-labelledby="roster-title"><div class="pane-heading"><h2 id="roster-title">Roster</h2><span id="roster-count"></span></div><div class="roster-search"><label for="roster-query">Find an athlete</label><input id="roster-query" type="search" placeholder="Search by name" autocomplete="off" /></div><div id="roster-list" class="roster-list" aria-label="Athletes"></div><div class="roster-foot">Select an athlete to review their week and coaching context.</div></aside>
         <section id="athlete-pane" class="athlete-pane" aria-live="polite" tabindex="-1"></section>
