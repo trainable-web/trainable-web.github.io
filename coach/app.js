@@ -1,5 +1,6 @@
 const API = 'https://txrsajvaqhqrlpsgjeyn.supabase.co';
 const KEY = 'sb_publishable_omyeFX4y5d9FtUUvg0b4Xg_5rO4atSa';
+const LIVE_COACH_URL = 'https://trainable-web.github.io/coach/';
 const SESSION_KEY = 'trainable_web_session';
 const OAUTH_KEY = 'trainable_coach_oauth_intent';
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -477,6 +478,7 @@ for (const id of ['email', 'password']) {
 }
 for (const [id, provider] of [['google-sign-in', 'google']]) {
   $('#' + id).addEventListener('click', () => {
+    if (location.protocol === 'file:') { location.assign(LIVE_COACH_URL); return; }
     sessionStorage.setItem(OAUTH_KEY, String(Date.now()));
     sessionStorage.setItem('trainable_web_oauth_intent', String(Date.now()));
     sessionStorage.setItem('trainable_coach_return', String(Date.now()));
@@ -632,6 +634,14 @@ $('#drawer-body').addEventListener('change', (event) => {
   }
 });
 async function start() {
+  if (location.protocol === 'file:') {
+    showAuth('');
+    $('#auth-title').textContent = 'Open Trainable Coach online.';
+    $('#auth-status').textContent = 'This saved copy cannot sign you in or show your current training.';
+    $('#google-sign-in').textContent = 'Open live Trainable Coach';
+    $('#sign-in-form').hidden = true;
+    return;
+  }
   if (await handleOAuth()) return;
   if (session()?.access_token) {
     try { await loadWorkspace(); return; } catch { sessionStorage.removeItem(SESSION_KEY); }
