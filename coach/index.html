@@ -9,8 +9,8 @@
     <meta name="application-name" content="Trainable Coach" />
     <meta name="apple-mobile-web-app-title" content="Trainable Coach" />
     <link rel="icon" href="../assets/trainable-mark-dark.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css" />
-    <script src="./app.js" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=20261005-reset-week" />
+    <script src="./app.js?v=20261005-reset-week" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -49,5 +49,6 @@
     <dialog id="revoke-dialog"><form method="dialog"><h2 id="revoke-title">Remove coach access?</h2><p id="revoke-copy">This coach will no longer see your training or prescribe sessions.</p><div class="dialog-actions"><button id="keep-access" value="cancel" class="secondary">Keep access</button><button value="confirm" class="danger">Remove access</button></div></form></dialog>
     <dialog id="discard-dialog"><form method="dialog"><h2>Discard this draft?</h2><p>Your unsaved changes to this page will be lost.</p><div class="dialog-actions"><button id="keep-draft" value="cancel" class="secondary">Keep editing</button><button value="confirm" class="danger">Discard draft</button></div></form></dialog>
     <dialog id="archive-note-dialog"><form method="dialog"><h2>Archive this athlete note?</h2><p>It will stop appearing in the profile and future assistant drafts.</p><div class="dialog-actions"><button id="keep-note" value="cancel" class="secondary">Keep note</button><button value="confirm" class="danger">Archive note</button></div></form></dialog>
+    <dialog id="reset-week-dialog" aria-labelledby="reset-week-title" aria-describedby="reset-week-copy"><form method="dialog"><h2 id="reset-week-title">Delete planned week?</h2><p id="reset-week-copy"></p><div class="dialog-actions"><button id="cancel-reset-week" value="cancel" class="secondary">Keep week</button><button value="confirm" class="danger">Delete and rebuild week</button></div></form></dialog>
   </body>
 </html>

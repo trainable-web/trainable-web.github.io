@@ -7,8 +7,8 @@ const ORDER = [1, 2, 3, 4, 5, 6, 0];
 const ZONES = [['recovery', 'Z1 · Recovery'], ['endurance', 'Z2 · Endurance'], ['tempo', 'Z3 · Tempo'], ['sweet_spot', 'Sweet spot'], ['threshold', 'Z4 · Threshold'], ['vo2max', 'Z5 · VO₂max'], ['anaerobic', 'Z6 · Anaerobic'], ['open', 'Open effort']];
 const TYPES = [['warmup', 'Warm-up'], ['work', 'Work'], ['recovery', 'Recovery'], ['cooldown', 'Cool-down']];
 const state = { roster: [], athleteId: null, athlete: null, builder: null, meeting: null, weekDraft: null, weekSelection: null,
-  sharedWith: [], trigger: null, editorDirty: false, noteToArchive: null,
-  weekGenerating: false, weekPublishing: false, noteSaving: false };
+  sharedWith: [], trigger: null, editorDirty: false, noteToArchive: null, weekReset: null, resetTrigger: null,
+  weekGenerating: false, weekPublishing: false, weekResetting: false, noteSaving: false };
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const title = (value) => String(value ?? '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
@@ -259,10 +259,13 @@ function updateWeekTotal() {
 function renderWeekEditor() {
   const d = state.weekDraft;
   const selected = d?.week_start_date || state.weekSelection || currentWeek();
+  const storedPlan = state.athlete?.plans?.find((p) => p.week_start_date === selected);
+  const hasStoredDays = state.athlete?.workouts?.some((w) => w.plan_id === storedPlan?.id);
   const selector = `<div class="form-group"><label for="week-start">Planning week</label><select id="week-start"><option value="${currentWeek()}" ${selected === currentWeek() ? 'selected' : ''}>This week · ${safe(dateLabel(currentWeek()))}</option><option value="${nextWeek()}" ${selected === nextWeek() ? 'selected' : ''}>Next week · ${safe(dateLabel(nextWeek()))}</option></select></div>`;
   const focus = `<div class="form-group"><label for="week-focus">Coach focus, optional</label><textarea id="week-focus" rows="2" maxlength="500" placeholder="Build aerobic base, with one sprint session">${safe(d?.focus || '')}</textarea><p class="helper">A short direction for the assistant. You can change every draft day before publishing.</p></div>`;
   const content = d ? `<div class="callout"><strong>Conservative baseline</strong><p>${safe(d.summary || 'A balanced starting point for coach review.')}</p><small>Recent cycling average: ${safe(trainingMinutesLabel(d.evidence.recent_average_min))} per week · Draft ceiling: ${safe(trainingMinutesLabel(d.evidence.baseline_cap_min))} · Single-session evidence limit: ${safe(trainingMinutesLabel(d.evidence.session_cap_min))}. ${d.notes_considered ? `${d.notes_considered} athlete note${d.notes_considered === 1 ? '' : 's'} considered.` : 'No athlete notes yet.'}${d.evidence.sessions < 2 ? ' Recent riding is limited, so review the starting load closely.' : ''}</small></div><div class="week-edit-list">${d.days.map(weekDayMarkup).join('')}</div><div class="week-review"><div><span>Reviewed week</span><strong id="week-total"></strong></div><p>AI prepared the baseline. You decide whether to publish it; fixed days stay in place.</p><div id="week-load-warning" class="callout warning" hidden><label class="acknowledge"><input id="week-acknowledge" type="checkbox"> I reviewed the added load above the conservative baseline.</label></div><p id="week-error" class="form-error" role="alert"></p><button type="button" class="primary" data-publish-week>Publish reviewed week</button><button type="button" class="quiet" data-generate-week>Generate a new baseline</button></div>` : `<div class="list-empty"><strong>Start with a safe baseline</strong><p>The assistant drafts the whole week from recent training, recovery, goals and athlete notes. Completed work and races stay fixed.</p><button type="button" class="primary" data-generate-week>Generate baseline week</button></div>`;
-  openEditor('week', 'WEEK BUILDER', 'Build the full week', `<p>Build a conservative starting week, then make the coaching decisions together.</p>${selector}${focus}<p id="week-status" class="status" role="status"></p>${content}`);
+  const resetAction = hasStoredDays ? `<div class="reset-week-action"><p>Want to start this planned week again? Review what can be removed before rebuilding it.</p><button type="button" class="quiet" data-reset-week>Delete planned week</button></div>` : '';
+  openEditor('week', 'WEEK BUILDER', 'Build the full week', `<p>Build a conservative starting week, then make the coaching decisions together.</p>${selector}${focus}<p id="week-status" class="status" role="status"></p>${content}${resetAction}`);
   if (d) updateWeekTotal();
 }
 function openWeek() { state.weekDraft = null; state.weekSelection = currentWeek(); state.editorDirty = false; renderWeekEditor(); }
@@ -274,7 +277,7 @@ function rerenderWeek() {
   for (const day of openDays) { const details = document.querySelector(`[data-week-day="${day}"] details`); if (details) details.open = true; }
   window.scrollTo(0, y);
 }
-async function generateWeek() {
+async function generateWeek(afterReset = false) {
   if (state.weekGenerating) return;
   const week_start_date = $('#week-start').value; const focus = $('#week-focus').value.trim();
   state.weekGenerating = true;
@@ -284,9 +287,58 @@ async function generateWeek() {
     const result = await portal('draft_week', { athlete_id: state.athleteId, week_start_date,
       client_date: localDate(), focus });
     state.weekSelection = week_start_date; state.weekDraft = { ...result, focus }; state.editorDirty = true;
-    renderWeekEditor(); $('#week-status').textContent = 'Baseline ready. Review each day before publishing.';
-  } catch (error) { setStatus(error.message, true, '#week-status'); }
+    renderWeekEditor(); $('#week-status').textContent = afterReset
+      ? 'Planned days deleted. Your new baseline is ready to review.'
+      : 'Baseline ready. Review each day before publishing.';
+  } catch (error) { setStatus(afterReset ? `Planned days deleted. Generate a new baseline when ready. ${error.message}` : error.message, true, '#week-status'); }
   finally { state.weekGenerating = false; if (button?.isConnected) button.disabled = false; }
+}
+async function previewResetWeek() {
+  if (state.weekResetting || state.weekReset) return;
+  const week_start_date = $('#week-start')?.value;
+  const button = $('[data-reset-week]');
+  if (button) button.disabled = true;
+  setStatus('Checking this planned week…', false, '#week-status');
+  try {
+    const result = await portal('preview_reset_week', { athlete_id: state.athleteId,
+      week_start_date, client_date: localDate() });
+    if (!result.removable?.length) {
+      setStatus('This week has no editable planned days to delete. Completed work, races and past days stay in place.', false, '#week-status');
+      return;
+    }
+    state.weekReset = { ...result, week_start_date };
+    state.resetTrigger = button;
+    const athlete = state.athlete?.profile?.display_name || 'this athlete';
+    $('#reset-week-title').textContent = `Delete the ${dateLabel(week_start_date)} week for ${athlete}?`;
+    const count = result.removable.length;
+    $('#reset-week-copy').textContent = `This removes ${count} editable planned day${count === 1 ? '' : 's'} and prepares a fresh baseline for coach review. ${result.preserved.length} protected day${result.preserved.length === 1 ? '' : 's'} will stay. Past days, completed sessions, races and recorded work are always kept.${state.weekDraft ? ' Your unsaved draft will also be discarded.' : ''}`;
+    setStatus('', false, '#week-status');
+    $('#reset-week-dialog').returnValue = 'cancel';
+    $('#reset-week-dialog').showModal(); $('#cancel-reset-week').focus();
+  } catch (error) { setStatus(error.message, true, '#week-status'); }
+  finally { if (button?.isConnected) button.disabled = false; }
+}
+async function resetWeek(snapshot) {
+  if (state.weekResetting) return;
+  state.weekResetting = true;
+  setStatus('Deleting editable planned days…', false, '#week-status');
+  let removed = false;
+  try {
+    await portal('reset_week', { athlete_id: state.athleteId,
+      week_start_date: snapshot.week_start_date, client_date: localDate(), confirmed: true,
+      expected_plan_id: snapshot.plan_id, expected_rows: snapshot.expected_rows });
+    removed = true;
+    state.weekDraft = null; state.editorDirty = false; state.weekSelection = snapshot.week_start_date;
+    state.athlete = await portal('read_athlete', { athlete_id: state.athleteId });
+    renderAthlete(); renderWeekEditor();
+    await generateWeek(true);
+  } catch (error) {
+    setStatus(removed ? `Planned days were deleted, but the view could not refresh. ${error.message}` : error.message, true, '#week-status');
+  } finally {
+    state.weekResetting = false;
+    state.resetTrigger = null;
+    $('#week-start')?.focus();
+  }
 }
 async function publishWeek() {
   if (state.weekPublishing) return;
@@ -457,8 +509,15 @@ $('#close-drawer').addEventListener('click', () => closeDrawer());
 $('#drawer-backdrop').addEventListener('click', () => closeDrawer());
 $('#discard-dialog').addEventListener('close', () => { if ($('#discard-dialog').returnValue === 'confirm') closeDrawer(true); else $('#close-drawer').focus(); });
 $('#archive-note-dialog').addEventListener('close', () => { if ($('#archive-note-dialog').returnValue === 'confirm') archiveNote(); else state.noteToArchive = null; });
+$('#reset-week-dialog').addEventListener('close', () => {
+  const snapshot = state.weekReset; state.weekReset = null;
+  if ($('#reset-week-dialog').returnValue === 'confirm' && snapshot) resetWeek(snapshot);
+  else if (state.resetTrigger?.isConnected) state.resetTrigger.focus();
+  state.resetTrigger = null;
+});
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !$('#drawer').hidden && !$('#revoke-dialog').open && !$('#discard-dialog').open) closeDrawer();
+  if (event.key === 'Escape' && !$('#drawer').hidden && !$('#revoke-dialog').open && !$('#discard-dialog').open
+    && !$('#archive-note-dialog').open && !$('#reset-week-dialog').open) closeDrawer();
   if (event.key === 'Tab' && !$('#drawer').hidden && !$('#drawer').classList.contains('page-mode')) {
     const focusable = [...$('#drawer').querySelectorAll('button, input, textarea, select, a[href]')].filter((el) => !el.disabled && !el.hidden);
     const first = focusable[0], last = focusable[focusable.length - 1];
@@ -481,6 +540,7 @@ $('#drawer-body').addEventListener('click', async (event) => {
   if (el.hasAttribute('data-save-minutes')) saveMinutes();
   if (el.hasAttribute('data-save-note')) saveNote();
   if (el.hasAttribute('data-generate-week')) generateWeek();
+  if (el.hasAttribute('data-reset-week')) previewResetWeek();
   if (el.hasAttribute('data-publish-week')) publishWeek();
   if (el.hasAttribute('data-week-add')) {
     captureWeekEditor(); const day = state.weekDraft.days.find((d) => d.day_of_week === Number(el.dataset.weekAdd));
