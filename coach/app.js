@@ -192,7 +192,12 @@ function renderIntervals() {
       day.hrv_ms != null ? `${Math.round(day.hrv_ms)} ms HRV` : '',
       day.resting_hr != null ? `${Math.round(day.resting_hr)} bpm resting HR` : '',
       day.steps != null ? `${Math.round(day.steps).toLocaleString()} steps` : ''].filter(Boolean);
-    return `<div class="device-workout"><div><strong>${safe(day.day)}</strong><small>${safe(values.join(' · ') || 'No supported measurements for this day')}</small></div></div>`;
+    const more = [day.sleep_score != null ? `Sleep score ${Math.round(day.sleep_score)}` : '',
+      day.spo2_pct != null ? `SpO₂ ${Math.round(day.spo2_pct)}%` : '',
+      day.body_battery_min != null || day.body_battery_max != null ? `Body Battery ${day.body_battery_min ?? '–'}–${day.body_battery_max ?? '–'}` : '',
+      day.weight_kg != null ? `Weight ${day.weight_kg.toFixed(1)} kg` : '',
+      day.vo2max != null ? `VO₂ max ${day.vo2max.toFixed(1)}` : ''].filter(Boolean);
+    return `<div class="device-workout intervals-day"><div><strong>${safe(day.day)}</strong><small>${safe(values.join(' · ') || 'No common measurements for this day')}</small>${more.length ? `<details><summary>More measurements</summary><p>${safe(more.join(' · '))}</p></details>` : ''}</div></div>`;
   }).join('');
   const heading = connected ? account.status === 'reauthorize' ? 'Reconnect to keep importing' : 'Connected' :
     account.configured ? 'Connect your Intervals.icu account' : 'Awaiting Intervals.icu app approval';
