@@ -1,13 +1,13 @@
 /* Coach analysis: stored observations only; imported sources remain separate. */
 const analysis = { athlete: null, tab: 'history', history: null, trends: null, historyRequest: 0, trendRequest: 0, detailRequest: 0,
-  filters: { search: '', sport: '', from: '', to: '', page: 0 }, range: null, detail: null, trace: 'watts', recovery: 'hrv_ms' };
+  filters: { search: '', sport: '', from: '', to: '', page: 0 }, range: null, detail: null, activityBack: null, trace: 'watts', traceVisible: [], recovery: 'hrv_ms' };
 const numberLabel = (value, suffix = '', digits = 0) => value == null || !Number.isFinite(Number(value)) ? '—' : Number(value).toLocaleString(undefined, { maximumFractionDigits: digits }) + suffix;
 const elapsedLabel = (value) => value == null ? '—' : Math.floor(value / 3600) + ':' + String(Math.floor(value % 3600 / 60)).padStart(2, '0') + ':' + String(Math.round(value % 60)).padStart(2, '0');
 const utcDay = (value) => value ? new Date(value).toISOString().slice(0, 10) : '';
 const shiftUTC = (value, days) => new Date(Date.parse(value) + days * 86400000).toISOString().slice(0, 10);
 const utcLabel = (value) => value ? new Date(value).toLocaleDateString(undefined, { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 function resetAnalysis() {
-  analysis.athlete = state.athleteId; analysis.history = null; analysis.trends = null; analysis.detail = null;
+  analysis.athlete = state.athleteId; analysis.history = null; analysis.trends = null; analysis.detail = null; analysis.activityBack = null;
   analysis.historyRequest++; analysis.trendRequest++; analysis.detailRequest++;
   analysis.filters = { search: '', sport: '', from: '', to: '', page: 0 };
   const to = utcDay(new Date()); analysis.range = { from: shiftUTC(to, -89), to }; analysis.tab = 'history';
@@ -56,16 +56,20 @@ function rangeForm() {
   return `<form id="trend-filter" class="analysis-filters"><div><label for="trend-from">From (UTC)</label><input required type="date" name="from" id="trend-from" value="${safe(analysis.range.from)}"></div><div><label for="trend-to">To (UTC)</label><input required type="date" name="to" id="trend-to" value="${safe(analysis.range.to)}"></div><button class="primary" type="submit">Update range</button><div class="range-shortcuts" role="group" aria-label="Recent date ranges">${[42,90,180,365].map((n) => `<button class="secondary" type="button" data-analysis-days="${n}">${n} days</button>`).join('')}</div></form><p id="range-error" class="form-error" role="alert"></p>`;
 }
 // Explicit nulls and breaks in time leave visible gaps; charts never turn missing data into zero.
-function dataChart(series, label, unit = '', maxGap = Infinity) {
+function dataChart(series, label, unit = '', maxGap = Infinity, xBounds = null, cursorTime = null) {
   const valid = series.flatMap((s) => s.points.filter((p) => p[1] != null && Number.isFinite(p[1])));
   if (!valid.length) return `<div class="chart-empty">No ${safe(label.toLowerCase())} recorded in this range.</div>`;
   const xs = valid.map((p) => p[0]), ys = valid.map((p) => p[1]);
-  const xmin = xs.reduce((a,b)=>Math.min(a,b),Infinity), xmax = xs.reduce((a,b)=>Math.max(a,b),-Infinity), ymin = ys.reduce((a,b)=>Math.min(a,b),0), ymax = ys.reduce((a,b)=>Math.max(a,b),1);
+  const xmin = xBounds?.[0] ?? xs.reduce((a,b)=>Math.min(a,b),Infinity), xmax = xBounds?.[1] ?? xs.reduce((a,b)=>Math.max(a,b),-Infinity);
+  const observedMin = ys.reduce((a,b)=>Math.min(a,b),Infinity), observedMax = ys.reduce((a,b)=>Math.max(a,b),-Infinity);
+  const zoomTrace = Boolean(xBounds && label !== 'Power' && label !== 'Distance');
+  const padding = Math.max(2,(observedMax-observedMin)*.12);
+  const ymin = zoomTrace ? Math.floor(observedMin-padding) : Math.min(0,observedMin), ymax = zoomTrace ? Math.ceil(observedMax+padding) : Math.max(1,observedMax);
   const width = Math.max(280,Math.min(1100,($('#drawer').hidden ? $('#analysis-content')?.clientWidth : $('#drawer-body')?.clientWidth) || 800) - 18);
   const right = width - 18;
   const x = (n) => 58 + (n - xmin) / (xmax - xmin || 1) * (right - 58), y = (n) => 202 - (n - ymin) / (ymax - ymin || 1) * 180;
   const paths = series.map((s) => { let open = false, previous = null; const d = s.points.map(([t,v]) => { if (v == null || !Number.isFinite(v)) { open = false; previous = t; return ''; } const cmd = !open || (previous != null && t - previous > maxGap) ? 'M' : 'L'; open = true; previous = t; return `${cmd}${x(t).toFixed(2)},${y(v).toFixed(2)}`; }).join(' '); return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.2" vector-effect="non-scaling-stroke"/>${(s.points.filter((p) => p[1] != null).length < 3 || Number.isFinite(maxGap)) ? s.points.filter((p) => p[1] != null).map(([t,v]) => `<circle cx="${x(t)}" cy="${y(v)}" r="3" fill="${s.color}"/>`).join('') : ''}`; }).join('');
-  return `<div class="chart-frame"><svg class="data-chart" viewBox="0 0 ${width} 234" role="img" aria-label="${safe(label)}. ${safe(unit)}. Use the accompanying controls and data tables to inspect values."><title>${safe(label)} (${safe(unit)})</title>${[0,.5,1].map((n) => `<line x1="58" x2="${right}" y1="${22 + n * 180}" y2="${22 + n * 180}" stroke="#d9ded9"/><text x="50" y="${27 + n * 180}" text-anchor="end">${numberLabel(ymax - n * (ymax-ymin), '', 1)}</text>`).join('')}${paths}<text x="58" y="226">${safe(unit === 'seconds' ? elapsedLabel(xmin) : utcLabel(xmin))}</text><text x="${right}" y="226" text-anchor="end">${safe(unit === 'seconds' ? elapsedLabel(xmax) : utcLabel(xmax))}</text></svg></div><div class="chart-legend">${series.map((s) => `<span><i style="background:${s.color}"></i>${safe(s.name)}</span>`).join('')}</div>`;
+  return `<div class="chart-frame"><svg class="data-chart" viewBox="0 0 ${width} 234" role="img" aria-label="${safe(label)} in ${safe(unit)}. ${xBounds ? 'Horizontal axis is elapsed time. ' : ''}Use the accompanying controls and data tables to inspect values."><title>${safe(label)} (${safe(unit)})</title>${[0,.5,1].map((n) => `<line x1="58" x2="${right}" y1="${22 + n * 180}" y2="${22 + n * 180}" stroke="#d9ded9"/><text x="50" y="${27 + n * 180}" text-anchor="end">${numberLabel(ymax - n * (ymax-ymin), '', 1)}</text>`).join('')}${paths}${cursorTime == null ? '' : `<line class="trace-cursor" x1="${x(cursorTime)}" x2="${x(cursorTime)}" y1="22" y2="202" stroke="#253d31" stroke-width="1.5"/>`}<text x="58" y="226">${safe(xBounds ? elapsedLabel(xmin) : utcLabel(xmin))}</text><text x="${right}" y="226" text-anchor="end">${safe(xBounds ? elapsedLabel(xmax) : utcLabel(xmax))}</text></svg></div><div class="chart-legend">${series.map((s) => `<span><i style="background:${s.color}"></i>${safe(s.name)}</span>`).join('')}</div>`;
 }
 function weeklyRecords(activities) {
   const weeks = new Map();
@@ -120,36 +124,56 @@ async function openActivity(id) {
   openEditor('activity', 'ACTIVITY ANALYSIS', 'Loading activity…', '<div class="chart-empty" role="status">Loading summary, traces and laps…</div>');
   $('#drawer').classList.add('analysis-page'); $('#close-drawer').textContent = 'Back to athlete'; $('#close-drawer').focus();
   history.replaceState(null, '', '#activity/' + athlete + '/' + id);
-  try { const detail = await portal('activity_detail', { athlete_id: athlete, activity_id: id }); if (request !== analysis.detailRequest || athlete !== state.athleteId || $('#drawer').hidden) return; analysis.detail = detail; analysis.trace = Object.keys(detail.channels).find((k) => detail.channels[k]?.some((p) => p[1] != null)) || 'watts'; renderActivity(); }
+  try { const detail = await portal('activity_detail', { athlete_id: athlete, activity_id: id }); if (request !== analysis.detailRequest || athlete !== state.athleteId || $('#drawer').hidden) return; analysis.detail = detail; analysis.traceVisible = ['watts','heartrate','cadence'].filter((k) => detail.channels[k]?.some((p) => p[1] != null)); if (!analysis.traceVisible.length) analysis.traceVisible = Object.keys(detail.channels).filter((k) => detail.channels[k]?.some((p) => p[1] != null)).slice(0,2); analysis.trace = analysis.traceVisible[0] || 'watts'; renderActivity(); }
   catch (error) { if (request === analysis.detailRequest && athlete === state.athleteId && !$('#drawer').hidden) { $('#drawer-title').textContent = 'Activity unavailable'; $('#drawer-body').innerHTML = `<p role="alert">${safe(error.message)}</p><button type="button" class="secondary" data-activity="${safe(id)}">Try again</button>`; } }
 }
-const TRACE_LABELS = {watts:['Power','W'],heartrate:['Heart rate','bpm'],cadence:['Cadence','rpm'],velocity_ms:['Speed','m/s'],altitude_m:['Elevation','m'],distance_m:['Distance','m']};
+const TRACE_LABELS = {watts:['Power','W'],heartrate:['Heart rate','bpm'],cadence:['Cadence','rpm'],velocity_ms:['Speed','km/h'],altitude_m:['Elevation','m'],distance_m:['Distance','km']};
+const displayTraceValue = (key, value) => value == null ? null : key === 'velocity_ms' ? value * 3.6 : key === 'distance_m' ? value / 1000 : value;
+function plannedComparison(d) {
+  const p = d.planned, a = d.activity;
+  if (!p) return '<p class="helper">No planned workout is linked to this activity. A workout on the same date is not treated as a match.</p>';
+  return `<p class="helper">Linked planned workout: ${safe(p.headline || title(p.workout_type) || 'Workout')}. Targets and results are shown separately.</p>${tableMarkup(['Measure','Planned','Recorded'],[['Duration',p.target_duration_min == null ? '—' : numberLabel(p.target_duration_min,' min'),elapsedLabel(a.duration_s)],['TSS',numberLabel(p.target_tss,'',1),numberLabel(a.raw_tss,'',1)]])}${p.session_rpe == null ? '' : `<p>Session RPE: <strong>${numberLabel(p.session_rpe,' / 10',1)}</strong></p>`}${p.description ? `<p class="preserve-lines">${safe(p.description)}</p>` : ''}`;
+}
+function comparableMarkup(d) {
+  const a = d.activity, rows = d.comparable_activities || [], c = d.comparison_criteria;
+  const criteria = c ? `Same sport · ${elapsedLabel(c.min_duration_s)}–${elapsedLabel(c.max_duration_s)} duration (75–125% of this session) · preceding ${c.days} days · latest five matches` : 'This activity has no usable duration or date for comparison.';
+  const cells = (r, current = false) => [current ? `<strong>${safe(utcLabel(r.start_date))} · This activity</strong>` : `<button type="button" class="record-link" data-activity="${safe(r.id)}">${safe(utcLabel(r.start_date))} · ${safe(r.name || title(r.sport_type))} →</button>`,elapsedLabel(r.duration_s),numberLabel(r.distance_m == null ? null : r.distance_m/1000,' km',1),numberLabel(r.avg_power,' W') + (r.avg_power != null && r.device_watts !== true ? '<small>Estimated or unconfirmed</small>' : ''),numberLabel(r.avg_hr,' bpm'),numberLabel(r.raw_tss,'',1)];
+  return `<section id="activity-comparison"><h3>Compare with previous activities</h3><p class="helper">${safe(criteria)}. Sessions are matched by sport and duration only; intensity, terrain and intent may differ. Missing values are not included in any estimate.</p>${tableMarkup(['Session','Duration','Distance','Avg power','Avg HR','TSS'],[cells(a,true),...rows.map((r) => cells(r))], 'No earlier activity meets these criteria.')}${!rows.length ? '<p class="helper">No earlier matching sessions are saved for this athlete.</p>' : ''}</section>`;
+}
 function renderActivity() {
   analysis.segmentRequest = (analysis.segmentRequest || 0) + 1;
   const d = analysis.detail, a = d.activity;
   $('#drawer-title').textContent = a.name || title(a.sport_type) + ' activity';
   const cells = [['Duration',elapsedLabel(a.duration_s)],['Distance',numberLabel(a.distance_m == null ? null : a.distance_m/1000,' km',2)],['Average power',numberLabel(a.avg_power,' W')],['Average HR',numberLabel(a.avg_hr,' bpm')],['TSS',numberLabel(a.raw_tss,'',1)],['Elevation gain',numberLabel(a.elevation_gain,' m')],['Weighted power (Strava)',numberLabel(a.strava_weighted_avg_watts,' W')],['Maximum power (Strava)',numberLabel(a.strava_max_watts,' W')]];
   const curve = Object.entries(a.power_curve || {}).filter(([s,w]) => Number(s)>0 && typeof w === 'number').sort((x,y) => Number(x[0])-Number(y[0]));
-  $('#drawer-body').innerHTML = `<p class="activity-meta">${safe(utcLabel(a.start_date))} · ${safe(new Date(a.start_date).toLocaleTimeString(undefined,{timeZone:'UTC',hour:'2-digit',minute:'2-digit'}))} UTC · ${safe(title(a.sport_type))} · ${safe(title(a.source))}</p><p class="helper">${a.avg_power == null ? 'No average power recorded.' : a.device_watts === true ? 'Power recorded by a power meter.' : 'Power is estimated or its measurement source is unconfirmed.'}</p><dl class="activity-values">${cells.map(([label,value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl><div class="athlete-feedback"><h3>Athlete feedback</h3><p>Feeling (1–5): ${safe(a.feeling == null ? 'Not recorded' : title(a.feeling))}</p><p class="preserve-lines">${safe(a.athlete_comment || 'No athlete comment recorded.')}</p></div>
-    <div class="section-head"><h3>Recorded traces</h3>${a.strava_activity_id && (!d.stream_samples || !d.laps.length) ? '<button type="button" class="secondary" data-fetch-traces>Fetch missing Strava detail</button>' : ''}</div><p id="trace-fetch-status" role="status"></p><div class="analysis-nav" role="group" aria-label="Trace metric">${Object.keys(d.channels).map((k) => `<button type="button" class="secondary" data-trace="${k}" aria-pressed="${analysis.trace === k}">${TRACE_LABELS[k][0]}</button>`).join('')}</div><div id="activity-trace"></div>
+  $('#drawer-body').innerHTML = `<nav class="activity-jump" aria-label="Activity sections">${analysis.activityBack ? `<button type="button" data-back-activity="${safe(analysis.activityBack.id)}">← ${safe(analysis.activityBack.name)}</button>` : ''}<button type="button" data-activity-jump="activity-summary">Summary</button><button type="button" data-activity-jump="activity-traces">Traces & segments</button><button type="button" data-activity-jump="activity-laps">Laps</button><button type="button" data-activity-jump="activity-comparison">Past activities</button></nav><section id="activity-summary"><p class="activity-meta">${safe(utcLabel(a.start_date))} · ${safe(new Date(a.start_date).toLocaleTimeString(undefined,{timeZone:'UTC',hour:'2-digit',minute:'2-digit'}))} UTC · ${safe(title(a.sport_type))} · ${safe(title(a.source))}</p><p class="helper">${a.avg_power == null ? 'No average power recorded.' : a.device_watts === true ? 'Power recorded by a power meter.' : 'Power is estimated or its measurement source is unconfirmed.'}</p><dl class="activity-values">${cells.map(([label,value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl><h3>Planned vs recorded</h3>${plannedComparison(d)}<div class="athlete-feedback"><h3>Athlete feedback</h3><p>Feeling (1–5): ${safe(a.feeling == null ? 'Not recorded' : title(a.feeling))}</p><p class="preserve-lines">${safe(a.athlete_comment || 'No athlete comment recorded.')}</p></div></section>
+    <section id="activity-traces"><div class="section-head"><h3>Recorded traces</h3>${a.strava_activity_id && (!d.stream_samples || !d.laps.length) ? '<button type="button" class="secondary" data-fetch-traces>Fetch missing Strava detail</button>' : ''}</div><p id="trace-fetch-status" role="status"></p><p class="helper">Power, heart rate and cadence share elapsed time. Select additional tracks to inspect them together.</p><div class="analysis-nav" role="group" aria-label="Visible trace tracks">${Object.keys(d.channels).map((k) => `<button type="button" class="secondary" data-trace="${k}" aria-pressed="${analysis.traceVisible.includes(k)}">${TRACE_LABELS[k][0]}</button>`).join('')}</div><div id="activity-trace"></div>
     ${d.stream_samples ? `<p class="helper">Chart preserves sample peaks from ${numberLabel(d.stream_samples)} stored points; it is reduced for display. Segment statistics use the full stored trace. Gaps longer than 10 seconds are excluded from segment averages.</p><form id="segment-form" class="analysis-filters"><div><label for="segment-from">Start (elapsed seconds)</label><input id="segment-from" type="number" min="0" step="any" required value="0"></div><div><label for="segment-to">End (elapsed seconds)</label><input id="segment-to" type="number" min="0" max="${d.stream_duration_s}" step="any" required value="${d.stream_duration_s}"></div><button type="submit" class="primary">Analyze segment</button></form><div id="segment-result" aria-live="polite"></div>` : '<p class="helper">No stored traces for this activity. Summary values are shown above; detailed samples cannot be inferred from averages.</p>'}
-    <h3>Laps & intervals</h3>${tableMarkup(['Lap','Start','Elapsed','Moving','Distance','Avg power','Max power','Avg HR','Max HR','Avg speed','Max speed','Elevation'],d.laps.map((l) => [d.stream_samples && l.start_s != null && l.elapsed_s > 0 && l.start_s + l.elapsed_s <= d.stream_duration_s ? `<button type="button" class="record-link" data-lap-from="${l.start_s}" data-lap-to="${l.start_s+l.elapsed_s}">${safe(l.name || 'Lap ' + l.lap_index)} →</button>` : safe(l.name || 'Lap ' + l.lap_index),elapsedLabel(l.start_s),elapsedLabel(l.elapsed_s),elapsedLabel(l.moving_s),numberLabel(l.distance_m == null ? null : l.distance_m/1000,' km',2),numberLabel(l.avg_watts,' W'),numberLabel(l.max_watts,' W'),numberLabel(l.avg_hr,' bpm'),numberLabel(l.max_hr,' bpm'),numberLabel(l.avg_speed_ms == null ? null : l.avg_speed_ms*3.6,' km/h',1),numberLabel(l.max_speed_ms == null ? null : l.max_speed_ms*3.6,' km/h',1),numberLabel(l.elevation_gain_m,' m')]),'No laps saved for this activity.')}
+    </section><section id="activity-laps"><h3>Laps & intervals</h3>${tableMarkup(['Lap','Start','Elapsed','Moving','Distance','Avg power','Max power','Avg HR','Max HR','Avg speed','Max speed','Elevation'],d.laps.map((l) => [d.stream_samples && l.start_s != null && l.elapsed_s > 0 && l.start_s + l.elapsed_s <= d.stream_duration_s ? `<button type="button" class="record-link" data-lap-from="${l.start_s}" data-lap-to="${l.start_s+l.elapsed_s}">${safe(l.name || 'Lap ' + l.lap_index)} →</button>` : safe(l.name || 'Lap ' + l.lap_index),elapsedLabel(l.start_s),elapsedLabel(l.elapsed_s),elapsedLabel(l.moving_s),numberLabel(l.distance_m == null ? null : l.distance_m/1000,' km',2),numberLabel(l.avg_watts,' W'),numberLabel(l.max_watts,' W'),numberLabel(l.avg_hr,' bpm'),numberLabel(l.max_hr,' bpm'),numberLabel(l.avg_speed_ms == null ? null : l.avg_speed_ms*3.6,' km/h',1),numberLabel(l.max_speed_ms == null ? null : l.max_speed_ms*3.6,' km/h',1),numberLabel(l.elevation_gain_m,' m')]),'No laps saved for this activity.')}</section>${comparableMarkup(d)}
     <h3>Power-duration bests for this activity</h3><p class="helper">Saved best average power for each duration in this activity${a.device_watts !== true ? '; power may be estimated' : ''}.</p>${tableMarkup(['Duration','Best average power'],curve.map(([s,w]) => [elapsedLabel(Number(s)),numberLabel(w,' W')]),'No power-duration record saved.')}${a.ai_insight ? `<details class="data-disclosure"><summary>Saved AI interpretation</summary><p class="helper">${safe(a.ai_insight_generated_at ? utcLabel(a.ai_insight_generated_at) : '')} · Interpretation, not a recorded measurement.</p><p class="preserve-lines">${safe(typeof a.ai_insight === 'string' ? a.ai_insight : JSON.stringify(a.ai_insight))}</p></details>` : ''}`;
   paintTrace();
 }
 function paintTrace() {
-  const points = analysis.detail.channels[analysis.trace] || [], [name,unit] = TRACE_LABELS[analysis.trace];
-  $('#activity-trace').innerHTML = points.length ? dataChart([{name:name + ' (' + unit + ')',color:'#2c6588',points}],name,'seconds') + `<label for="trace-position">Inspect a recorded point</label><input id="trace-position" type="range" min="0" max="${points.length-1}" value="0" step="1"><output id="trace-reading" for="trace-position" aria-live="polite"></output>` : '<div class="chart-empty">No recorded trace available.</div>';
+  const d = analysis.detail, keys = analysis.traceVisible.filter((key) => d.channels[key]?.length), samples = d.cursor_samples || [];
+  const bounds = [0, d.stream_duration_s || Math.max(...keys.map((key) => d.channels[key].at(-1)?.[0] || 0))];
+  const colors = {watts:'#2c6588',heartrate:'#ad622a',cadence:'#477343',velocity_ms:'#795c9b',altitude_m:'#777b42',distance_m:'#705d50'};
+  $('#activity-trace').innerHTML = keys.length ? `<div class="trace-stack">${keys.map((key) => `<section class="trace-track"><h4>${TRACE_LABELS[key][0]} <small>(${TRACE_LABELS[key][1]})</small></h4>${dataChart([{name:TRACE_LABELS[key][0],color:colors[key],points:d.channels[key].map(([t,v]) => [t,displayTraceValue(key,v)])}],TRACE_LABELS[key][0],TRACE_LABELS[key][1],Infinity,bounds,samples[0]?.time_s ?? 0)}</section>`).join('')}</div>${samples.length ? `<div class="trace-inspector"><label for="trace-position">Inspect the same recorded time across tracks</label><input id="trace-position" type="range" min="0" max="${samples.length-1}" value="0" step="1"><output id="trace-reading" for="trace-position" aria-live="polite"></output><p class="helper">Inspection uses up to 800 aligned stored samples. Segment analysis below uses every stored sample.</p><button type="button" class="secondary" data-export-trace>Export inspected samples (CSV)</button></div>` : ''}` : '<div class="chart-empty">No recorded trace available.</div>';
   readTrace(0);
 }
-function readTrace(index) { const point = analysis.detail?.channels[analysis.trace]?.[index]; if (point && $('#trace-reading')) $('#trace-reading').textContent = elapsedLabel(point[0]) + ' elapsed · ' + numberLabel(point[1],' ' + TRACE_LABELS[analysis.trace][1],1); }
+function readTrace(index) {
+  const sample = analysis.detail?.cursor_samples?.[index], output = $('#trace-reading');
+  if (!sample || !output) return;
+  output.innerHTML = `<strong>${elapsedLabel(sample.time_s)} elapsed</strong>${analysis.traceVisible.map((key) => `<span>${TRACE_LABELS[key][0]} <strong>${numberLabel(displayTraceValue(key,sample[key]),' ' + TRACE_LABELS[key][1],1)}</strong></span>`).join('')}`;
+  const time = sample.time_s, duration = analysis.detail.stream_duration_s || time;
+  $('#activity-trace').querySelectorAll('.trace-cursor').forEach((line) => { const svg = line.ownerSVGElement, width = svg.viewBox.baseVal.width, x = 58 + time / (duration || 1) * (width - 76); line.setAttribute('x1',x); line.setAttribute('x2',x); });
+}
 async function analyzeSegment() {
   const from = Number($('#segment-from').value), to = Number($('#segment-to').value), d = analysis.detail, request = analysis.detailRequest;
   if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to <= from || to > d.stream_duration_s) { $('#segment-result').innerHTML = '<p class="form-error" role="alert">Choose an end after the start, within the recorded trace.</p>'; return; }
   const segmentRequest = (analysis.segmentRequest || 0) + 1; analysis.segmentRequest = segmentRequest;
   $('#segment-result').textContent = 'Calculating from stored samples…';
   try { const result = await portal('activity_segment',{athlete_id:state.athleteId,activity_id:d.activity.id,from_s:from,to_s:to}); if (request !== analysis.detailRequest || segmentRequest !== analysis.segmentRequest || !$('#segment-result')) return;
-    $('#segment-result').innerHTML = `<h4>${elapsedLabel(from)} – ${elapsedLabel(to)}</h4>${tableMarkup(['Metric','Time-weighted average','Maximum','Recorded coverage'],Object.entries(result.segment.metrics).map(([key,m]) => [TRACE_LABELS[key][0],numberLabel(m.average,' ' + TRACE_LABELS[key][1],1),numberLabel(m.maximum,' ' + TRACE_LABELS[key][1],1),numberLabel(m.coverage_s,' s',1) + ' / ' + numberLabel(to-from,' s',1)]))}`;
+    $('#segment-result').innerHTML = `<h4>${elapsedLabel(from)} – ${elapsedLabel(to)}</h4>${tableMarkup(['Metric','Time-weighted average','Maximum','Recorded coverage'],Object.entries(result.segment.metrics).map(([key,m]) => [TRACE_LABELS[key][0],numberLabel(displayTraceValue(key,m.average),' ' + TRACE_LABELS[key][1],1),numberLabel(displayTraceValue(key,m.maximum),' ' + TRACE_LABELS[key][1],1),numberLabel(m.coverage_s,' s',1) + ' / ' + numberLabel(to-from,' s',1)]))}`;
   } catch (error) { if (request === analysis.detailRequest && segmentRequest === analysis.segmentRequest && $('#segment-result')) $('#segment-result').innerHTML = `<p class="form-error" role="alert">${safe(error.message)}</p>`; }
 }
 function exportAnalysis(kind) {
@@ -158,6 +182,7 @@ function exportAnalysis(kind) {
   if (kind === 'trends') rows = [...(t?.load || []).map((r) => ({record_type:'daily_load',...r})),...(t?.activities || []).map((r) => ({record_type:'activity',...r}))];
   if (kind === 'imports') rows = t?.imported || [];
   if (kind === 'recovery') rows = [...(t?.readiness || []).map((r) => ({source:'Trainable readiness',...r})),...(t?.wellness || []).map((r) => ({...r,source:'Intervals.icu wellness'}))];
+  if (kind === 'trace') rows = (analysis.detail?.cursor_samples || []).map((r) => ({activity_id:analysis.detail.activity.id,...r}));
   if (!rows.length) { setStatus('No records to export for this view.'); return; }
   const fields = [...new Set(rows.flatMap((r) => Object.keys(r)))];
   const escapeCell = (value) => { const s = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value); return '"' + (/^[\s]*[=+@-]/.test(s) ? "'" : '') + s.replace(/"/g,'""') + '"'; };
@@ -172,7 +197,9 @@ document.addEventListener('submit', (event) => {
 document.addEventListener('click', (event) => {
   const el = event.target.closest('button'); if (!el) return;
   if (el.dataset.analysisTab) { analysis.tab = el.dataset.analysisTab; renderAthlete(); $(`[data-analysis-tab="${analysis.tab}"]`).focus(); }
-  if (el.dataset.activity) { el.focus(); openActivity(el.dataset.activity); }
+  if (el.dataset.activity) { analysis.activityBack = el.closest('#activity-comparison') && analysis.detail ? {id:analysis.detail.activity.id,name:analysis.detail.activity.name || 'Previous activity'} : null; el.focus(); openActivity(el.dataset.activity); }
+  if (el.dataset.backActivity) { const id = el.dataset.backActivity; analysis.activityBack = null; openActivity(id); }
+  if (el.dataset.activityJump) { const section = document.getElementById(el.dataset.activityJump); section?.scrollIntoView({block:'start',behavior:'smooth'}); section?.setAttribute('tabindex','-1'); section?.focus({preventScroll:true}); }
   if (el.dataset.analysisRetry === 'history') loadHistory();
   if (el.dataset.analysisRetry === 'trends') loadTrends();
   if (el.hasAttribute('data-history-page')) { analysis.filters.page = Math.max(0,analysis.filters.page+Number(el.dataset.historyPage)); loadHistory(); }
@@ -180,20 +207,21 @@ document.addEventListener('click', (event) => {
   if (el.dataset.analysisDays) { const to = utcDay(new Date()); analysis.range = {to,from:shiftUTC(to,1-Number(el.dataset.analysisDays))}; loadTrends(); }
   if (el.dataset.drillWeek) { analysis.filters = {search:'',sport:'',from:el.dataset.drillWeek < analysis.range.from ? analysis.range.from : el.dataset.drillWeek,to:shiftUTC(el.dataset.drillWeek,6) > analysis.range.to ? analysis.range.to : shiftUTC(el.dataset.drillWeek,6),page:0}; analysis.tab = 'history'; analysis.history = null; renderAthlete(); $('#history-from').focus(); }
   if (el.dataset.recovery) { analysis.recovery = el.dataset.recovery; paintTrends(); $(`[data-recovery="${analysis.recovery}"]`).focus(); }
-  if (el.dataset.trace) { analysis.trace = el.dataset.trace; document.querySelectorAll('[data-trace]').forEach((b) => b.setAttribute('aria-pressed',b.dataset.trace === analysis.trace)); paintTrace(); }
+  if (el.dataset.trace) { const key = el.dataset.trace, visible = analysis.traceVisible; if (visible.includes(key) && visible.length > 1) analysis.traceVisible = visible.filter((k) => k !== key); else if (!visible.includes(key)) analysis.traceVisible = [...visible,key]; document.querySelectorAll('[data-trace]').forEach((b) => b.setAttribute('aria-pressed',analysis.traceVisible.includes(b.dataset.trace))); paintTrace(); }
   if (el.hasAttribute('data-lap-from')) { $('#segment-from').value = el.dataset.lapFrom; $('#segment-to').value = el.dataset.lapTo; analyzeSegment(); $('#segment-form').scrollIntoView({block:'center'}); $('#segment-from').focus(); }
   if (el.dataset.export) exportAnalysis(el.dataset.export);
+  if (el.hasAttribute('data-export-trace')) exportAnalysis('trace');
   if (el.hasAttribute('data-fetch-traces')) fetchActivityDetail(el);
 });
 document.addEventListener('input', (event) => { if (event.target.id === 'trace-position') readTrace(Number(event.target.value)); if (event.target.closest('#segment-form, #activity-trace')) state.editorDirty = false; if (event.target.closest('#trend-filter')) $('#range-error').textContent = ''; });
 
 document.addEventListener('pointermove',(event)=>{
   const svg = event.target.closest('#activity-trace svg'); if (!svg || !analysis.detail) return;
-  const points = analysis.detail.channels[analysis.trace] || []; if (!points.length) return;
+  const points = analysis.detail.cursor_samples || []; if (!points.length) return;
   const rect=svg.getBoundingClientRect(), width=svg.viewBox.baseVal.width;
   const fraction=Math.max(0,Math.min(1,((event.clientX-rect.left)/rect.width*width-58)/(width-76)));
-  const time=points[0][0]+fraction*(points.at(-1)[0]-points[0][0]);
-  let index=0; for(let i=1;i<points.length;i++) if(Math.abs(points[i][0]-time)<Math.abs(points[index][0]-time)) index=i;
+  const time=fraction*(analysis.detail.stream_duration_s || points.at(-1).time_s);
+  let index=0; for(let i=1;i<points.length;i++) if(Math.abs(points[i].time_s-time)<Math.abs(points[index].time_s-time)) index=i;
   $('#trace-position').value=index; readTrace(index);
 });
 
@@ -203,7 +231,7 @@ async function fetchActivityDetail(button) {
   try {
     const detail = await portal('sync_activity_detail',{athlete_id:state.athleteId,activity_id:activity});
     if (request !== analysis.detailRequest || $('#drawer').hidden) return;
-    analysis.detail = detail; analysis.trace = Object.keys(detail.channels).find((key)=>detail.channels[key]?.length) || 'watts'; renderActivity();
+    analysis.detail = detail; analysis.traceVisible = ['watts','heartrate','cadence'].filter((key)=>detail.channels[key]?.length); if (!analysis.traceVisible.length) analysis.traceVisible = Object.keys(detail.channels).filter((key)=>detail.channels[key]?.length).slice(0,2); analysis.trace = analysis.traceVisible[0] || 'watts'; renderActivity();
     $('#trace-fetch-status').textContent = detail.stream_samples ? 'Saved detail refreshed.' : 'Strava did not return a recorded trace for this activity.';
   } catch(error) { if (request === analysis.detailRequest && $('#trace-fetch-status')) { $('#trace-fetch-status').textContent = error.message; button.disabled = false; } }
 }

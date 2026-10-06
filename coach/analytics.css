@@ -78,6 +78,33 @@
 
 .drawer.page-mode.analysis-page { max-width: 1280px; }
 .data-table .record-link { min-width: 120px; }
+.activity-jump { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--line); padding: 0 0 12px; margin-bottom: 8px; }
+.activity-jump button { border: 1px solid #a2aca5; border-radius: 4px; padding: 8px 12px; min-height: 44px; background: #fff; color: var(--green); font-weight: 700; }
+.activity-jump button:hover { background: var(--green-soft); }
+.trace-stack { display: grid; gap: 8px; }
+.trace-track { min-width: 0; }
+.trace-track h4 { font-size: 14px; margin: 12px 0 5px; }
+.trace-track h4 small { color: var(--muted); font-weight: 400; }
+.trace-track .chart-legend { display: none; }
+.trace-inspector { border: 1px solid var(--line); background: #f7f9f5; padding: 12px 14px; margin-top: 12px; }
+.trace-inspector label { margin-bottom: 8px; }
+.trace-inspector output { display: flex !important; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; margin-bottom: 8px; }
+.trace-inspector output span { font-size: 14px; }
+.trace-inspector output span strong { margin-left: 5px; }
+.trace-inspector button { margin-top: 12px; }
+#activity-comparison,#activity-laps { margin-top: 20px; }
+@media(min-width:1280px) {
+  .workspace { width: 100%; max-width: none; padding-inline: clamp(18px,2vw,40px); }
+  .split-pane { grid-template-columns: clamp(210px,16vw,270px) minmax(0,1fr); }
+  .athlete-pane { padding-inline: clamp(20px,2vw,40px); }
+  .drawer.page-mode.analysis-page { max-width: none; width: 100%; }
+  .analysis-page .drawer-head,.analysis-page .drawer-body { max-width: none; width: 100%; }
+  .analysis-page #drawer-body { display: grid; grid-template-columns: minmax(330px,.82fr) minmax(0,1.18fr); gap: 0 clamp(20px,2vw,36px); align-items: start; }
+  .analysis-page #drawer-body > :not(#activity-summary):not(#activity-traces) { grid-column: 1 / -1; }
+  .analysis-page #activity-summary,.analysis-page #activity-traces { min-width: 0; }
+  .analysis-page #activity-summary .activity-values { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .activity-jump { position: sticky; top: 0; z-index: 2; background: var(--surface); padding-top: 8px; }
+}
 @media(max-width:767.98px) {
   .drawer.page-mode.analysis-page .drawer-head { flex-direction: column-reverse; align-items: stretch; gap: 12px; padding-top: 16px; }
   .drawer.page-mode.analysis-page .drawer-head h2 { font-size: 24px; }
