@@ -9,8 +9,8 @@
     <meta name="application-name" content="Trainable Coach" />
     <meta name="apple-mobile-web-app-title" content="Trainable Coach" />
     <link rel="icon" href="../assets/trainable-mark-dark.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=20261005-devices" />
-    <script src="./app.js?v=20261005-devices-pilot" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=20261005-intervals" />
+    <script src="./app.js?v=20261005-intervals" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -61,5 +61,6 @@
     <dialog id="archive-note-dialog"><form method="dialog"><h2>Archive this athlete note?</h2><p>It will stop appearing in the profile and future assistant drafts.</p><div class="dialog-actions"><button id="keep-note" value="cancel" class="secondary">Keep note</button><button value="confirm" class="danger">Archive note</button></div></form></dialog>
     <dialog id="reset-week-dialog" aria-labelledby="reset-week-title" aria-describedby="reset-week-copy"><form method="dialog"><h2 id="reset-week-title">Delete planned week?</h2><p id="reset-week-copy"></p><div class="dialog-actions"><button id="cancel-reset-week" value="cancel" class="secondary">Keep week</button><button value="confirm" class="danger">Delete and rebuild week</button></div></form></dialog>
     <dialog id="remove-garmin-dialog" aria-labelledby="remove-garmin-title"><form method="dialog"><h2 id="remove-garmin-title">Remove Garmin Connect?</h2><p>This removes the Garmin connection and imported Garmin workouts from Trainable. Your Strava and Apple Health data stays as it is.</p><div class="dialog-actions"><button id="keep-garmin" value="cancel" class="secondary">Keep Garmin</button><button value="confirm" class="danger">Remove Garmin data</button></div></form></dialog>
+    <dialog id="remove-intervals-dialog" aria-labelledby="remove-intervals-title"><form method="dialog"><h2 id="remove-intervals-title">Disconnect Intervals.icu?</h2><p>Trainable will revoke its Intervals.icu access and delete imported activities and wellness data from your account.</p><div class="dialog-actions"><button id="keep-intervals" value="cancel" class="secondary">Keep connected</button><button value="confirm" class="danger">Disconnect and delete data</button></div></form></dialog>
   </body>
 </html>

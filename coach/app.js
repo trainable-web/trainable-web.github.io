@@ -12,7 +12,7 @@ const state = { roster: [], athleteId: null, athlete: null, builder: null, meeti
   sharedWith: [], trigger: null, editorDirty: false, noteToArchive: null, weekReset: null, resetTrigger: null,
   weekGenerating: false, weekPublishing: false, weekResetting: false, noteSaving: false, mobileDetailOpen: false, athleteRequest: 0,
   calendarWeek: null, calendarDay: null, attention: null, attentionFilter: 'open', devices: null,
-  wearableWorkouts: [], removeGarminTrigger: null };
+  wearableWorkouts: [], removeGarminTrigger: null, intervals: null, removeIntervalsTrigger: null };
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const title = (value) => String(value ?? '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
@@ -85,6 +85,18 @@ async function wearables(action, payload = {}) {
   if (!response.ok) { const error = new Error(data.error || 'Device connection could not complete.'); error.status = response.status; error.authInvalid = response.status === 401; throw error; }
   return data;
 }
+async function intervals(action) {
+  const request = (accessToken) => fetch(API + '/functions/v1/intervals-portal', { method: 'POST',
+    headers: { apikey: KEY, Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }) });
+  let response = await request(await token());
+  if (response.status === 401 && session()?.refresh_token) {
+    const updated = await refreshSession(session()); response = await request(updated.access_token);
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) { const error = new Error(data.error || 'Intervals.icu could not complete that action.'); error.status = response.status; throw error; }
+  return data;
+}
 function showAuth(message = '') {
   $('#auth-page').hidden = false; $('#workspace').hidden = true; $('#sign-out').hidden = true;
   $('#workspace').classList.remove('mobile-detail-open'); state.mobileDetailOpen = false;
@@ -151,13 +163,41 @@ async function showDevices() {
   state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open');
   setWorkspaceView('devices');
   if (location.hash !== '#devices') history.pushState(null, '', '#devices');
-  $('#devices-content').innerHTML = '<div class="devices-panel"><p>Checking Garmin availability and your connection…</p></div>';
+  $('#devices-content').innerHTML = '<div class="devices-panel"><p>Checking your data sources…</p></div>';
   try {
     const [status, workouts] = await Promise.all([wearables('status'), wearables('workouts', { athlete_id: session()?.user?.id })]);
     state.devices = { ...status, workouts: workouts.workouts || [] }; renderDevices();
   } catch (error) {
     $('#devices-content').innerHTML = `<div class="devices-panel"><strong>Device status is unavailable</strong><p>${safe(error.message)}</p><button type="button" class="secondary" data-device-retry>Try again</button></div>`;
   }
+  try { state.intervals = await intervals('status'); }
+  catch (error) { state.intervals = { error: error.message }; }
+  $('#devices-content').insertAdjacentHTML('afterbegin', renderIntervals());
+  const outcome = new URL(location.href).searchParams.get('intervals');
+  if (outcome) {
+    history.replaceState(null, '', location.pathname + '#devices');
+    if (outcome === 'connected') setStatus('Intervals.icu connected. Import your recent data when ready.');
+    else if (outcome === 'cancelled') setStatus('Intervals.icu connection cancelled.');
+    else setStatus('Intervals.icu could not connect. Try again or check its app permissions.', true);
+  }
+}
+function renderIntervals() {
+  const account = state.intervals || {};
+  if (account.error) return `<section class="devices-panel"><p class="eyebrow">INTERVALS.ICU</p><h3>Connection status unavailable</h3><p>${safe(account.error)}</p><button type="button" class="secondary" data-device-retry>Try again</button></section>`;
+  const connected = account.connected;
+  const records = (account.wellness || []).slice(0, 7);
+  const activities = (account.activities || []).slice(0, 5);
+  const rows = records.map((day) => {
+    const values = [day.sleep_s != null ? `${(day.sleep_s / 3600).toFixed(1)} h sleep` : '',
+      day.hrv_ms != null ? `${Math.round(day.hrv_ms)} ms HRV` : '',
+      day.resting_hr != null ? `${Math.round(day.resting_hr)} bpm resting HR` : '',
+      day.steps != null ? `${Math.round(day.steps).toLocaleString()} steps` : ''].filter(Boolean);
+    return `<div class="device-workout"><div><strong>${safe(day.day)}</strong><small>${safe(values.join(' · ') || 'No supported measurements for this day')}</small></div></div>`;
+  }).join('');
+  const heading = connected ? account.status === 'reauthorize' ? 'Reconnect to keep importing' : 'Connected' :
+    account.configured ? 'Connect your Intervals.icu account' : 'Awaiting Intervals.icu app approval';
+  const activityRows = activities.map((ride) => `<div class="device-workout"><div><strong>${safe(ride.name || ride.sport)}</strong><small>${safe(dateLabel(ride.started_at))} · Garmin via Intervals.icu${ride.device ? ' · ' + safe(ride.device) : ''}</small></div><span>${safe(minutesLabel(Math.round(ride.duration_s / 60)))}</span></div>`).join('');
+  return `<section class="devices-panel intervals-panel"><div class="device-setting"><div><p class="eyebrow">INTERVALS.ICU / GARMIN ROUTE</p><h3>${heading}</h3><p>Connect Garmin in Intervals.icu and enable its activity and wellness downloads. Then approve Trainable’s read-only access to your Intervals.icu account.</p></div><div class="device-controls">${account.configured && (!connected || account.status === 'reauthorize') ? '<button type="button" class="primary" data-intervals-connect>Connect Intervals.icu</button>' : ''}${connected && account.status === 'connected' ? '<button type="button" class="secondary" data-intervals-sync>Import recent data</button>' : ''}</div></div><p class="device-fineprint">${connected ? `Last import: ${account.last_synced_at ? safe(dateLabel(account.last_synced_at)) : 'not yet imported'}. ` : ''}Wellness may come from Garmin or another Intervals.icu source; workout summaries below are Garmin sourced. Imports are for your review only and do not change training load or plans. Charts may include data from Garmin devices.</p>${connected ? `<div class="intervals-history"><p class="eyebrow">RECENT WELLNESS</p><div class="device-workouts">${rows || '<p class="list-empty">No wellness imported yet. Enable Garmin wellness downloads in Intervals.icu, then import here.</p>'}</div></div><div class="intervals-history"><p class="eyebrow">GARMIN ACTIVITIES</p><div class="device-workouts">${activityRows || '<p class="list-empty">No Garmin-sourced activities imported yet.</p>'}</div></div><button type="button" class="danger intervals-remove" data-intervals-remove>Disconnect and delete Intervals.icu data</button>` : '<p class="device-next-step"><a href="https://intervals.icu/settings" target="_blank" rel="noopener noreferrer">Open Intervals.icu settings</a> to connect Garmin and enable wellness downloads.</p>'}</section>`;
 }
 function renderDevices() {
   const device = state.devices; if (!device) return;
@@ -669,6 +709,24 @@ $('#show-devices').addEventListener('click', showDevices);
 $('#devices-content').addEventListener('click', async (event) => {
   const button = event.target.closest('button'); if (!button) return;
   if (button.hasAttribute('data-device-retry')) { await showDevices(); return; }
+  if (button.hasAttribute('data-intervals-connect')) {
+    button.disabled = true; button.textContent = 'Opening Intervals.icu…';
+    try { const result = await intervals('connect');
+      const url = new URL(result.authorization_url);
+      if (url.origin !== 'https://intervals.icu' || url.pathname !== '/oauth/authorize') throw new Error('Intervals.icu returned an unexpected sign-in address.');
+      location.assign(url.href);
+    } catch (error) { button.disabled = false; button.textContent = 'Connect Intervals.icu'; setStatus(error.message, true); }
+    return;
+  }
+  if (button.hasAttribute('data-intervals-sync')) {
+    button.disabled = true; button.textContent = 'Importing…';
+    try { const result = await intervals('sync'); await showDevices(); setStatus(`Checked ${result.wellness_days} wellness days and ${result.garmin_activities} Garmin activities.`); }
+    catch (error) { button.disabled = false; button.textContent = 'Import recent data'; setStatus(error.message, true); }
+    return;
+  }
+  if (button.hasAttribute('data-intervals-remove')) {
+    state.removeIntervalsTrigger = button; $('#remove-intervals-dialog').showModal(); $('#keep-intervals').focus(); return;
+  }
   if (button.hasAttribute('data-device-remove')) {
     state.removeGarminTrigger = button; $('#remove-garmin-dialog').showModal(); $('#keep-garmin').focus(); return;
   }
@@ -683,6 +741,12 @@ $('#devices-content').addEventListener('click', async (event) => {
       setStatus(result.has_more ? 'Imported the first batch. Import again for older workouts.' : `Garmin import finished: ${result.imported} workouts checked.`); }
     catch (error) { button.disabled = false; button.textContent = 'Import latest workouts'; setStatus(error.message, true); }
   }
+});
+$('#remove-intervals-dialog').addEventListener('close', async () => {
+  const trigger = state.removeIntervalsTrigger; state.removeIntervalsTrigger = null;
+  if ($('#remove-intervals-dialog').returnValue !== 'confirm') { trigger?.focus(); return; }
+  try { await intervals('disconnect'); await showDevices(); setStatus('Intervals.icu disconnected and imported wellness deleted.'); $('#show-devices').focus(); }
+  catch (error) { setStatus(error.message, true); trigger?.focus(); }
 });
 $('#remove-garmin-dialog').addEventListener('close', async () => {
   const trigger = state.removeGarminTrigger; state.removeGarminTrigger = null;
