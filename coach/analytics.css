@@ -1,0 +1,85 @@
+/* Analytical reporting and activity detail. */
+.athlete-section-nav { gap: 18px; overflow-x: auto; }
+.athlete-section-nav button { flex-shrink: 0; white-space: nowrap; }
+.metric-date { display: none; }
+.analysis-nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 20px; }
+.analysis-nav button[aria-pressed=true] { background: #e5eee7; border-color: #28543c; color: #203d2c; }
+.analysis-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 16px 0; }
+.analysis-filters > div { flex: 1 1 140px; min-width: 0; }
+.analysis-filters .search-field { flex-basis: 200px; }
+.analysis-filters label { font-size: 12px; margin-bottom: 6px; display: block; }
+.analysis-filters input,.analysis-filters select { width: 100%; min-width: 0; font-size: 14px; }
+.analysis-filters .range-shortcuts { display: flex; gap: 8px; flex-wrap: wrap; flex-basis: 100%; }
+.data-table-wrap { border: 1px solid var(--line); border-radius: 4px; overflow-x: auto; max-width: 100%; background: white; }
+.data-table { border-collapse: collapse; width: 100%; font-size: 14px; text-align: left; font-variant-numeric: tabular-nums; }
+.data-table th { font-weight: 700; background: #f2f5f1; font-size: 12px; }
+.data-table th,.data-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
+.data-table tr:last-child td { border-bottom: 0; }
+.data-table tbody tr:hover { background: #f6f8f4; }
+.data-table td:nth-child(2) { white-space: normal; max-width: 320px; overflow-wrap: anywhere; }
+.data-table small { display: block; font-size: 12px; color: var(--muted); }
+.record-link { display: inline-block; border: 0; background: transparent; padding: 4px 0; text-align: left; color: #235a7b; font-size: 14px; min-height: 44px; text-decoration: underline; text-underline-offset: 3px; }
+.record-link span { display: block; font-weight: 400; font-size: 12px; text-decoration: none; }
+.data-empty { padding: 24px !important; white-space: normal !important; font-size: 14px; }
+.data-empty p { margin: 8px 0 16px; }
+.data-pagination { display: flex; justify-content: space-between; gap: 12px; align-items: center; font-size: 12px; margin: 16px 0; }
+.data-pagination button:disabled { color: #606b63; opacity: 1; background: #f4f5f2; border-color: #c9d0c8; }
+.analysis-summary { display: flex; gap: 16px 32px; flex-wrap: wrap; padding: 16px; margin-bottom: 24px; border: 1px solid var(--line); background: #f7f9f5; font-size: 14px; }
+.analysis-summary strong { font-size: 20px; display: block; }
+.analysis-section h4,.analysis-page h3 { font-size: 18px; margin: 28px 0 12px; }
+.chart-frame { border: 1px solid var(--line); border-radius: 4px; background: white; padding: 8px 0; }
+.data-chart { display: block; width: 100%; height: auto; min-height: 0; }
+.data-chart text { fill: #4d5951; font: 12px 'Instrument Sans',sans-serif; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0 20px; font-size: 12px; }
+.chart-legend span { display: flex; align-items: center; gap: 6px; }
+.chart-legend i { display: inline-block; width: 16px; height: 3px; }
+.chart-empty { border: 1px solid var(--line); padding: 40px 20px; color: var(--muted); background: #f7f9f5; font-size: 14px; }
+.data-disclosure { border: 1px solid var(--line); margin-top: 16px; border-radius: 4px; }
+.data-disclosure summary { cursor: pointer; padding: 12px; min-height: 44px; font-size: 14px; font-weight: 700; }
+.data-disclosure p { padding: 0 16px; }
+.profile-fields,.activity-values { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 0; border: 1px solid var(--line); }
+.profile-fields > div,.activity-values > div { padding: 12px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.profile-fields dt,.activity-values dt { font-size: 12px; color: var(--muted); }
+.profile-fields dd,.activity-values dd { margin: 4px 0 0; font-size: 16px; font-weight: 700; }
+.preserve-lines { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.coaching-tools { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 20px 0; }
+.coaching-tools button { padding: 16px; text-align: left; }
+.coaching-tools span { display: block; margin-top: 8px; font-size: 14px; font-weight: 400; color: var(--muted); }
+.analysis-page .drawer-body { max-width: 1200px; width: 100%; margin: auto; }
+.analysis-page .drawer-head { max-width: 1200px; }
+.analysis-page .activity-values { grid-template-columns: repeat(4,minmax(0,1fr)); }
+.activity-meta { font-size: 14px; }
+.athlete-feedback { border-left: 3px solid #a8b9a8; padding: 0 16px; }
+.athlete-feedback h3 { font-size: 16px; }
+#trace-position { width: 100%; padding: 0; min-height: 44px; accent-color: #28543c; }
+#trace-reading { display: block; font-size: 14px; font-variant-numeric: tabular-nums; }
+.data-warning { padding: 12px; background: #fff4db; border: 1px solid #cbb788; font-size: 14px; }
+@media(max-width:767.98px) {
+  .analysis-filters { display: grid; grid-template-columns: minmax(0,1fr); }
+  .analysis-summary { gap: 16px; }
+  .profile-fields,.analysis-page .activity-values { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .coaching-tools { grid-template-columns: minmax(0,1fr); }
+  .data-pagination { flex-wrap: wrap; }
+  .data-chart { min-width: 0; }
+  .analysis-nav button { flex: 1 1 auto; }
+}
+
+.analysis-filters select { min-height: 44px; padding: 10px 12px; border: 1px solid #a2aca5; border-radius: 4px; background: white; color: var(--ink); }
+.load-timestamp { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+#activity-trace svg { cursor: crosshair; }
+
+.analysis-filters select { appearance: none; -webkit-appearance: none; height: 44px; padding-right: 32px; background: white url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%234d5951' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 10px center; }
+@media(max-width:767.98px) {
+  .analysis-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .analysis-filters .search-field,.analysis-filters .range-shortcuts { grid-column: 1 / -1; }
+  .metrics .metric { min-height: 72px; padding: 8px; }
+  .analysis-filters > button { min-width: 0; padding-inline: 8px; }
+}
+
+.drawer.page-mode.analysis-page { max-width: 1280px; }
+.data-table .record-link { min-width: 120px; }
+@media(max-width:767.98px) {
+  .drawer.page-mode.analysis-page .drawer-head { flex-direction: column-reverse; align-items: stretch; gap: 12px; padding-top: 16px; }
+  .drawer.page-mode.analysis-page .drawer-head h2 { font-size: 24px; }
+  .analysis-page #close-drawer { align-self: flex-start; white-space: nowrap; text-align: left; }
+}
