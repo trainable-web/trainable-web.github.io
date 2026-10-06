@@ -299,9 +299,9 @@ function renderAthlete() {
   const name = p.display_name || (isSelf ? 'Your training' : 'Athlete');
   const metrics = data.metrics;
   const cells = [
-    ['Fitness', metrics?.ctl == null ? '—' : Math.round(metrics.ctl), 'CTL · 42-day load'],
-    ['Fatigue', metrics?.atl == null ? '—' : Math.round(metrics.atl), 'ATL · 7-day load'],
-    ['Form', metrics?.tsb == null ? '—' : Math.round(metrics.tsb), 'TSB · Fitness − fatigue'],
+    ['Fitness', metrics?.ctl == null ? '—' : Math.round(metrics.ctl), 'Modeled CTL · 42-day load'],
+    ['Fatigue', metrics?.atl == null ? '—' : Math.round(metrics.atl), 'Modeled ATL · 7-day load'],
+    ['Form', metrics?.tsb == null ? '—' : Math.round(metrics.tsb), 'Modeled TSB · fitness − fatigue'],
     ['FTP', data.zones?.ftp_watts ? Math.round(data.zones.ftp_watts) + ' W' : '—', 'Cycling threshold'],
     ['Energy', data.readiness?.checkin_energy != null ? data.readiness.checkin_energy + ' / 5' : '—', data.readiness?.metric_date ? 'Check-in · ' + dateLabel(data.readiness.metric_date) : 'No check-in yet'],
   ];
@@ -313,7 +313,7 @@ function renderAthlete() {
     <button type="button" class="mobile-back quiet" data-action="back-to-roster">← All athletes</button>
     <header class="athlete-top"><div class="athlete-identity"><h2>${safe(name)}</h2><p>${safe(title(p.primary_sport || 'Training'))}${isSelf ? ' · Your training' : ' · Athlete'}</p></div><div class="athlete-actions">${week >= currentWeek() ? `<button type="button" class="primary" data-action="new-workout">Add workout</button><button type="button" class="secondary" data-action="build-week">Plan week</button>` : '<button type="button" class="secondary" data-action="this-week">Go to this week</button>'}</div></header>
     <div class="metrics" aria-label="Athlete training measures">${cells.map((c) => `<div class="metric"><span>${safe(c[0])}</span><strong>${safe(c[1])}</strong><small>${safe(c[2])}</small></div>`).join('')}</div>
-    <p class="load-timestamp">${metrics?.metric_date ? 'Training load last recorded: ' + safe(utcLabel(metrics.metric_date)) : 'No training-load record available.'}</p><div class="athlete-section-nav" role="group" aria-label="Athlete view">${[['analysis','Activity & trends'],['calendar','Calendar'],['profile','Athlete profile'],['notes','Notes & calls'],['tools','Coaching tools']].map(([value,label]) => `<button type="button" data-athlete-section="${value}" aria-pressed="${section === value}">${label}</button>`).join('')}</div>
+    <p class="load-timestamp">${metrics?.metric_date ? 'Training load last recorded: ' + safe(utcLabel(metrics.metric_date)) : 'No training-load record available.'} Modeled load may include estimates; review the data behind it before planning.</p><div class="athlete-section-nav" role="group" aria-label="Athlete view">${[['analysis','Activity & trends'],['calendar','Calendar'],['profile','Athlete profile'],['notes','Notes & calls'],['tools','Coaching tools']].map(([value,label]) => `<button type="button" data-athlete-section="${value}" aria-pressed="${section === value}">${label}</button>`).join('')}</div>
     <section class="week-section" ${section !== 'calendar' ? 'hidden' : ''}>${renderCalendar(week, workouts)}</section>
     <section class="analysis-section" ${section !== 'analysis' ? 'hidden' : ''}>${section === 'analysis' ? analysisMarkup() : ''}</section>
     <section ${section !== 'profile' ? 'hidden' : ''}>${section === 'profile' ? profileMarkup() : ''}</section>

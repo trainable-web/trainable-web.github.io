@@ -1,5 +1,5 @@
 /* Coach analysis: stored observations only; imported sources remain separate. */
-const analysis = { athlete: null, tab: 'history', history: null, trends: null, historyRequest: 0, trendRequest: 0, detailRequest: 0,
+const analysis = { athlete: null, tab: 'review', history: null, trends: null, historyRequest: 0, trendRequest: 0, detailRequest: 0,
   filters: { search: '', sport: '', from: '', to: '', page: 0 }, range: null, detail: null, activityBack: null, trace: 'watts', traceVisible: [], traceRange: null, aiReport: null, backfillBusy: false, backfillStatus: '', recovery: 'hrv_ms' };
 const numberLabel = (value, suffix = '', digits = 0) => value == null || !Number.isFinite(Number(value)) ? '—' : Number(value).toLocaleString(undefined, { maximumFractionDigits: digits }) + suffix;
 const elapsedLabel = (value) => value == null ? '—' : Math.floor(value / 3600) + ':' + String(Math.floor(value % 3600 / 60)).padStart(2, '0') + ':' + String(Math.round(value % 60)).padStart(2, '0');
@@ -11,20 +11,20 @@ function resetAnalysis() {
   analysis.historyRequest++; analysis.trendRequest++; analysis.detailRequest++;
   analysis.filters = { search: '', sport: '', from: '', to: '', page: 0 };
   analysis.backfillStatus = ''; analysis.backfillBusy = false;
-  const to = utcDay(new Date()); analysis.range = { from: shiftUTC(to, -89), to }; analysis.tab = 'history';
+  const to = utcDay(new Date()); analysis.range = { from: shiftUTC(to, -89), to }; analysis.tab = 'review';
 }
 // Used by the workspace renderer in app.js.
 // deno-lint-ignore no-unused-vars
 function analysisMarkup() {
   if (analysis.athlete !== state.athleteId) resetAnalysis();
-  return `<div class="analysis-nav" role="group" aria-label="Analysis view">${[['history','Activity history'],['trends','Training trends'],['recovery','Recovery & health'],['imports','Imported activities']].map(([id,label]) => `<button type="button" class="secondary" data-analysis-tab="${id}" aria-pressed="${analysis.tab === id}">${label}</button>`).join('')}</div><div id="analysis-content"></div>`;
+  return `<div class="analysis-nav" role="group" aria-label="Analysis view">${[['review','Coach review'],['history','Activity history'],['trends','Training trends'],['recovery','Recovery & health'],['imports','Imported activities']].map(([id,label]) => `<button type="button" class="secondary" data-analysis-tab="${id}" aria-pressed="${analysis.tab === id}">${label}</button>`).join('')}</div><div id="analysis-content"></div>`;
 }
 // Used by the workspace renderer in app.js.
 // deno-lint-ignore no-unused-vars
 function paintAnalysis() {
   if (!$('#analysis-content')) return;
   if (analysis.tab === 'history') { paintHistory(); if (!analysis.history) loadHistory(); }
-  else { paintTrends(); if (!analysis.trends) loadTrends(); }
+  else { analysis.tab === 'review' ? paintReview() : paintTrends(); if (!analysis.trends) loadTrends(); }
 }
 function analysisError(message, retry) { return `<div class="data-empty" role="alert"><strong>Could not load these records</strong><p>${safe(message)}</p><button type="button" class="secondary" data-analysis-retry="${retry}">Try again</button></div>`; }
 function tableMarkup(headers, rows, empty = 'No records in this date range.') {
@@ -48,10 +48,54 @@ async function loadHistory() {
 }
 async function loadTrends() {
   const request = ++analysis.trendRequest, athlete = state.athleteId;
-  analysis.trends = null; if (analysis.tab !== 'history') paintTrends();
+  analysis.trends = null; if (analysis.tab === 'review') paintReview(); else if (analysis.tab !== 'history') paintTrends();
   try { const result = await portal('athlete_trends', { athlete_id: athlete, ...analysis.range }); if (request !== analysis.trendRequest || athlete !== state.athleteId) return; analysis.trends = result; }
   catch (error) { if (request !== analysis.trendRequest || athlete !== state.athleteId) return; analysis.trends = { error: error.message }; }
-  if (analysis.tab !== 'history' && $('#analysis-content')) paintTrends();
+  if (analysis.tab !== 'history' && $('#analysis-content')) analysis.tab === 'review' ? paintReview() : paintTrends();
+}
+function paintReview() {
+  const root = $('#analysis-content'); if (!root) return;
+  const t = analysis.trends, d = state.athlete || {}, p = d.profile || {};
+  const today = utcDay(new Date()), from = shiftUTC(today, -27), week = shiftUTC(today, -6);
+  const activities = (t?.activities || []).filter((a) => { const day = utcDay(a.start_date); return day >= from && day <= today; }).sort((a,b) => String(b.start_date).localeCompare(String(a.start_date)));
+  const lastSeven = activities.filter((a) => utcDay(a.start_date) >= week);
+  const previous = activities.filter((a) => utcDay(a.start_date) < week);
+  const hours = (rows) => rows.reduce((n,a) => n + Math.max(0, Number(a.duration_s) || 0), 0) / 3600;
+  const count = (test) => activities.filter(test).length;
+  const paired = count((a) => a.sport_type === 'cycling' && a.device_watts === true && Number(a.avg_power) > 0 && Number(a.avg_hr) > 0);
+  const lastRide = activities.find((a) => a.sport_type === 'cycling');
+  const checkin = d.readiness, checkinAge = checkin?.metric_date ? Math.round((Date.parse(today) - Date.parse(checkin.metric_date)) / 86400000) : null;
+  const upcoming = (d.goals || []).filter((g) => g.target_date && g.target_date >= today).sort((a,b) => a.target_date.localeCompare(b.target_date))[0];
+  const thisWeek = currentWeek(), followingWeek = nextWeek();
+  const planCount = (day) => { const ids = new Set((d.plans || []).filter((plan) => plan.week_start_date === day).map((plan) => plan.id)); return (d.workouts || []).filter((w) => ids.has(w.plan_id)).length; };
+  const notes = (d.coach_notes || []).slice(0, 3);
+  const questions = [
+    ...(upcoming ? [] : ['What event or outcome is the next block built for?']),
+    ...(checkinAge != null && checkinAge <= 3 ? [] : ['How is recovery today, and has anything changed since the last check-in?']),
+    ...(!p.day_availability_min || !Object.keys(p.day_availability_min).length ? ['What time can the athlete actually train next week?'] : []),
+    ['When was the current FTP set, and how did the key rides feel and go for fueling?'],
+  ];
+  const signalRows = [
+    ['Recorded TSS',count((a) => Number.isFinite(Number(a.raw_tss)) && a.raw_tss != null),'Directly stored session score'],
+    ['Power meter',count((a) => a.device_watts === true && Number(a.avg_power) > 0),'Cycling efforts and power-duration review'],
+    ['Heart rate',count((a) => Number(a.avg_hr) > 0),'Cardiovascular response'],
+    ['Power + HR',paired,'Compare output and response on the same ride'],
+  ];
+  const context = [
+    `<div><dt>Next goal</dt><dd>${upcoming ? `${safe(title(upcoming.event_type) || 'Training goal')} · ${safe(utcLabel(upcoming.target_date))}` : 'No upcoming dated goal recorded'}</dd></div>`,
+    `<div><dt>Athlete check-in</dt><dd>${checkinAge == null ? 'None recorded' : `${safe(utcLabel(checkin.metric_date))} · ${checkinAge === 0 ? 'today' : checkinAge + ' days ago'}${checkin.checkin_energy == null ? '' : ' · energy ' + safe(checkin.checkin_energy) + '/5'}${checkin.checkin_sleep_quality == null ? '' : ' · sleep ' + safe(checkin.checkin_sleep_quality) + '/5'}`}</dd></div>`,
+    `<div><dt>Current threshold</dt><dd>${numberLabel(d.zones?.ftp_watts,' W')} FTP · ${numberLabel(d.zones?.threshold_hr,' bpm')} threshold HR<small>Threshold setting dates are not recorded here. Older load may use different settings.</small></dd></div>`,
+    `<div><dt>Availability</dt><dd>${p.day_availability_min && Object.keys(p.day_availability_min).length ? 'Weekly schedule recorded' : 'No weekly schedule recorded'}${p.preferred_rest_days?.length ? ' · preferred rest: ' + safe(p.preferred_rest_days.map((day) => DAYS[day] || day).join(', ')) : ''}</dd></div>`,
+    `<div><dt>Injury or environment notes</dt><dd>${p.injury_notes || p.environment_notes ? safe([p.injury_notes,p.environment_notes].filter(Boolean).join(' · ')) : 'None recorded'}</dd></div>`,
+    `<div><dt>Plan coverage</dt><dd>${planCount(thisWeek)} entries this week · ${planCount(followingWeek)} next week</dd></div>`,
+  ].join('');
+  root.innerHTML = `<div class="section-head"><div><h3>Coach review</h3><p class="helper">Evidence for the next training decision · ${safe(utcLabel(from))}–${safe(utcLabel(today))} UTC</p></div><button type="button" class="secondary" data-review-refresh>Refresh</button></div>
+    ${t?.error ? analysisError(t.error, 'review') : !t ? '<div class="chart-empty" role="status">Loading training and athlete context…</div>' : `<div class="review-layout"><div class="review-main">
+      ${t.coverage_limited ? '<p class="data-warning">More than 10,000 activities are in this range. These totals may be incomplete.</p>' : ''}
+      <div class="review-numbers" aria-label="Recent training summary"><div><span>Past 7 days</span><strong>${numberLabel(hours(lastSeven),' h',1)}</strong><small>${lastSeven.length} recorded activities</small></div><div><span>Prior 3-week average</span><strong>${numberLabel(hours(previous)/3,' h',1)}</strong><small>Per 7 days, recorded</small></div><div><span>Latest ride</span><strong>${lastRide ? safe(utcLabel(lastRide.start_date)) : '—'}</strong><small>${lastRide ? safe(lastRide.name || 'Cycling') : 'No ride in this period'}</small></div></div>
+      <section class="review-block"><div class="review-heading"><h4>What the data supports</h4><button type="button" class="record-link" data-analysis-tab="trends">Open trends →</button></div><p class="helper">${activities.length} saved activities in 28 days. Counts below show available signals, not data quality within a recording.</p>${tableMarkup(['Signal','Activities','Useful for'],signalRows.map(([name,n,purpose]) => [safe(name),`${n} / ${activities.length}`,safe(purpose)]))}<p class="review-caution">Fitness, fatigue and form use a load model. When recorded TSS is absent, the model can estimate stress from weighted power, summary HR, or duration alone. Treat load trends as context; inspect the rides before changing the plan.</p></section>
+      <section class="review-block"><div class="review-heading"><h4>Recent sessions</h4><button type="button" class="record-link" data-analysis-tab="history">Full history →</button></div>${tableMarkup(['Date','Session','Duration','Power','HR'],activities.slice(0,6).map((a) => [safe(utcLabel(a.start_date)),`<button type="button" class="record-link" data-activity="${safe(a.id)}">${safe(a.name || title(a.sport_type))} →</button>`,elapsedLabel(a.duration_s),numberLabel(a.avg_power,' W'),numberLabel(a.avg_hr,' bpm')]),'No saved activities in the past 28 days. Check connected sources before assuming training stopped.')}</section>
+    </div><aside class="review-context"><h4>Before prescribing</h4><dl>${context}</dl>${checkinAge == null || checkinAge > 3 ? '<p class="review-caution">Check-in is missing or older than 3 days. Confirm recovery and constraints with the athlete before using it to set intensity.</p>' : ''}<h4>Still to confirm</h4><ul class="review-questions">${questions.map((q) => `<li>${safe(q)}</li>`).join('')}</ul><div class="review-actions"><button type="button" class="primary" data-athlete-section="calendar">Review calendar</button><button type="button" class="secondary" data-action="build-week">Plan week</button><button type="button" class="secondary" data-action="new-note">Add context note</button><button type="button" class="secondary" data-athlete-section="profile">Full profile</button></div><h4>Latest coach and athlete notes</h4>${notes.length ? `<ul class="review-notes">${notes.map((n) => `<li><small>${safe(title(n.kind || 'Note'))} · ${safe(utcLabel(n.created_at))}</small><p>${safe(n.body)}</p></li>`).join('')}</ul>` : '<p class="helper">No notes recorded. Add training response, constraints or preferences after speaking with the athlete.</p>'}</aside></div>`}`;
 }
 function rangeForm() {
   return `<form id="trend-filter" class="analysis-filters"><div><label for="trend-from">From (UTC)</label><input required type="date" name="from" id="trend-from" value="${safe(analysis.range.from)}"></div><div><label for="trend-to">To (UTC)</label><input required type="date" name="to" id="trend-to" value="${safe(analysis.range.to)}"></div><button class="primary" type="submit">Update range</button><div class="range-shortcuts" role="group" aria-label="Recent date ranges">${[42,90,180,365].map((n) => `<button class="secondary" type="button" data-analysis-days="${n}">${n} days</button>`).join('')}</div></form><p id="range-error" class="form-error" role="alert"></p>`;
@@ -244,6 +288,7 @@ document.addEventListener('click', (event) => {
   if (el.dataset.activityJump) { const section = document.getElementById(el.dataset.activityJump); section?.scrollIntoView({block:'start',behavior:'smooth'}); section?.setAttribute('tabindex','-1'); section?.focus({preventScroll:true}); }
   if (el.dataset.analysisRetry === 'history') loadHistory();
   if (el.dataset.analysisRetry === 'trends') loadTrends();
+  if (el.dataset.analysisRetry === 'review' || el.hasAttribute('data-review-refresh')) loadTrends();
   if (el.hasAttribute('data-history-page')) { analysis.filters.page = Math.max(0,analysis.filters.page+Number(el.dataset.historyPage)); loadHistory(); }
   if (el.hasAttribute('data-clear-history')) { analysis.filters = {search:'',sport:'',from:'',to:'',page:0}; loadHistory(); }
   if (el.dataset.analysisDays) { const to = utcDay(new Date()); analysis.range = {to,from:shiftUTC(to,1-Number(el.dataset.analysisDays))}; loadTrends(); }
