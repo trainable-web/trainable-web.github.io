@@ -11,7 +11,8 @@ const TYPES = [['warmup', 'Warm-up'], ['work', 'Work'], ['recovery', 'Recovery']
 const state = { roster: [], athleteId: null, athlete: null, builder: null, meeting: null, weekDraft: null, weekSelection: null,
   sharedWith: [], trigger: null, editorDirty: false, noteToArchive: null, weekReset: null, resetTrigger: null,
   weekGenerating: false, weekPublishing: false, weekResetting: false, noteSaving: false, mobileDetailOpen: false, athleteRequest: 0,
-  calendarWeek: null, calendarDay: null, attention: null, attentionFilter: 'open' };
+  calendarWeek: null, calendarDay: null, attention: null, attentionFilter: 'open', devices: null,
+  wearableWorkouts: [], removeGarminTrigger: null };
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const title = (value) => String(value ?? '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
@@ -72,6 +73,18 @@ async function portal(action, payload = {}) {
   if (!response.ok) { const error = new Error(data.error || 'Trainable could not complete that action.'); error.status = response.status; error.authInvalid = response.status === 401; throw error; }
   return data;
 }
+async function wearables(action, payload = {}) {
+  const request = (accessToken) => fetch(API + '/functions/v1/wearables-portal', { method: 'POST',
+    headers: { apikey: KEY, Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...payload }) });
+  let response = await request(await token());
+  if (response.status === 401 && session()?.refresh_token) {
+    const updated = await refreshSession(session()); response = await request(updated.access_token);
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) { const error = new Error(data.error || 'Device connection could not complete.'); error.status = response.status; error.authInvalid = response.status === 401; throw error; }
+  return data;
+}
 function showAuth(message = '') {
   $('#auth-page').hidden = false; $('#workspace').hidden = true; $('#sign-out').hidden = true;
   $('#workspace').classList.remove('mobile-detail-open'); state.mobileDetailOpen = false;
@@ -110,6 +123,7 @@ async function loadWorkspace() {
   showWorkspace(result.email || session()?.user?.email);
   const route = location.hash.slice(1).split('/');
   renderRoster();
+  if (route[0] === 'devices') { await showDevices(); return; }
   if (!route[0] || route[0] === 'attention') { await showAttention(); return; }
   showAthletes(false, false);
   const wanted = ['athlete', 'builder', 'meeting', 'week', 'note'].includes(route[0]) ? route[1] : null;
@@ -124,10 +138,40 @@ async function loadWorkspace() {
   if (route[0] === 'note' && wanted === state.athleteId) openNote();
 }
 function setWorkspaceView(view) {
+  $('#workspace-title').innerHTML = view === 'devices' ? 'Your data sources<span class="heading-period">.</span>' : 'Your coaching day<span class="heading-period">.</span>';
+  $('#workspace-subtitle').textContent = view === 'devices' ? 'Control what your account shares with Trainable.' : 'See what needs a decision, then open the athlete behind it.';
   $('#attention-view').hidden = view !== 'attention';
+  $('#devices-view').hidden = view !== 'devices';
   $('.split-pane').hidden = view !== 'athletes';
   $('#show-attention').setAttribute('aria-current', view === 'attention' ? 'page' : 'false');
   $('#show-athletes').setAttribute('aria-current', view === 'athletes' ? 'page' : 'false');
+  $('#show-devices').setAttribute('aria-current', view === 'devices' ? 'page' : 'false');
+}
+async function showDevices() {
+  state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open');
+  setWorkspaceView('devices');
+  if (location.hash !== '#devices') history.pushState(null, '', '#devices');
+  $('#devices-content').innerHTML = '<div class="devices-panel"><p>Checking Garmin availability and your connection…</p></div>';
+  try {
+    const [status, workouts] = await Promise.all([wearables('status'), wearables('workouts', { athlete_id: session()?.user?.id })]);
+    state.devices = { ...status, workouts: workouts.workouts || [] }; renderDevices();
+  } catch (error) {
+    $('#devices-content').innerHTML = `<div class="devices-panel"><strong>Device status is unavailable</strong><p>${safe(error.message)}</p><button type="button" class="secondary" data-device-retry>Try again</button></div>`;
+  }
+}
+function renderDevices() {
+  const device = state.devices; if (!device) return;
+  const ready = device.configured && device.garmin_available;
+  const active = device.connected;
+  const status = !device.configured ? 'Trainable is preparing the Garmin connection.'
+    : !device.garmin_available ? 'Garmin is not enabled on the connection server yet.'
+    : active ? 'Connected to Garmin Connect' : device.account_state === 'provisioning' ? 'Connection setup paused. Remove this request to retry.'
+    : device.account_state === 'deleting' ? 'Removal is still in progress. Try again.' : 'Ready to connect';
+  const workouts = device.workouts || [];
+  const rows = workouts.map((w) => `<div class="device-workout"><div><strong>${safe(w.name || title(w.sport))}</strong><small>${safe(dateLabel(w.started_at))} · Garmin${w.device ? ' · ' + safe(w.device) : ''}</small></div><span>${safe(minutesLabel(Math.round(w.duration_s / 60)))}</span></div>`).join('');
+  $('#devices-content').innerHTML = `<div class="devices-panel"><div class="device-setting"><div><p class="eyebrow">GARMIN CONNECT</p><h3>${safe(status)}</h3><p>Connect with Garmin’s own approval screen. Trainable stores a source-labelled workout summary; your Garmin password stays with Garmin.</p></div><div class="device-controls">${ready && !active && (!device.account_state || device.account_state === 'ready') ? '<button type="button" class="primary" data-device-connect>Connect Garmin</button>' : ''}${active ? '<button type="button" class="secondary" data-device-sync>Import latest workouts</button>' : ''}</div></div><p class="device-fineprint">Garmin imports are shown for review and do not change training load or workouts yet. A ride may also be present through Strava or Apple Health. Garmin history can take time to arrive after approval.</p></div>
+    <section class="devices-panel device-history"><div class="section-head"><div><p class="eyebrow">RECENTLY IMPORTED</p><h3>Garmin workouts</h3></div><strong>${workouts.length}</strong></div><div class="device-workouts">${rows || '<p class="list-empty">No Garmin workouts imported yet.</p>'}</div></section>
+    ${device.account_state ? `<section class="device-danger"><h3>Remove connection and data</h3><p>Remove the Open Wearables account and Garmin imports linked to your Trainable account.</p><button type="button" class="danger" data-device-remove>Remove Garmin data</button></section>` : ''}`;
 }
 async function showAttention() {
   state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open');
@@ -145,7 +189,7 @@ async function showAttention() {
 function showAthletes(updateRoute = true, loadSelection = true) {
   setWorkspaceView('athletes');
   if (updateRoute) { state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); }
-  if (updateRoute && location.hash === '#attention') history.pushState(null, '', '#team');
+  if (updateRoute && (location.hash === '#attention' || location.hash === '#devices')) history.pushState(null, '', '#team');
   if (loadSelection && !state.athlete && state.roster.length) selectAthlete(state.roster[0].id, { updateRoute: false });
 }
 function renderAttention() {
@@ -186,11 +230,12 @@ async function selectAthlete(id, options = {}) {
     state.mobileDetailOpen = options.openDetail;
     $('#workspace').classList.toggle('mobile-detail-open', state.mobileDetailOpen);
   }
-  state.athleteId = id; state.athlete = null; renderRoster(); $('#athlete-pane').innerHTML = '<p class="list-empty">Loading the training week…</p>';
+  state.athleteId = id; state.athlete = null; state.wearableWorkouts = []; renderRoster(); $('#athlete-pane').innerHTML = '<p class="list-empty">Loading the training week…</p>';
   try {
-    const athlete = await portal('read_athlete', { athlete_id: id });
+    const [athlete, imported] = await Promise.all([portal('read_athlete', { athlete_id: id }),
+      wearables('workouts', { athlete_id: id }).catch(() => ({ workouts: [] }))]);
     if (request !== state.athleteRequest) return;
-    state.athlete = athlete;
+    state.athlete = athlete; state.wearableWorkouts = imported.workouts || [];
     if (options.updateRoute !== false && location.hash !== '#athlete/' + id) history[options.pushRoute ? 'pushState' : 'replaceState'](null, '', '#athlete/' + id);
     renderAthlete();
   } catch (error) { if (request === state.athleteRequest) $('#athlete-pane').innerHTML = '<p class="list-empty">Could not load this athlete. ' + safe(error.message) + '</p>'; }
@@ -231,6 +276,7 @@ function renderAthlete() {
   const canAddDay = selectedDate >= today && week === currentWeek();
   const meetingRows = data.meetings.length ? data.meetings.map((m, mi) => `<div class="meeting-row"><strong>${safe(dateLabel(m.happened_at))} · Coach call</strong><p>${safe(m.summary)}</p>${m.meeting_url ? '<small>Google Meet linked</small>' : ''}<div class="meeting-changes">${(m.proposed_changes || []).map((c, ci) => `<button type="button" data-change="${mi}:${ci}">Draft workout from: ${safe(c)}</button>`).join('')}</div></div>`).join('') : '<div class="list-empty"><strong>No coach calls yet</strong><p>Review a Google Meet transcript to turn agreed changes into a clear plan.</p><button type="button" class="secondary small-button" data-action="new-meeting">Add call notes</button></div>';
   const activityRows = data.activities.length ? data.activities.slice(0, 4).map((a) => `<div class="activity-row"><strong>${safe(title(a.sport_type))} · ${safe(minutesLabel(Math.round(a.duration_s / 60)))}</strong><br><small>${safe(dateLabel(a.start_date))}${a.raw_tss ? ' · ' + Math.round(a.raw_tss) + ' TSS' : ''}</small></div>`).join('') : '<div class="list-empty">Recent activities will appear after a training source syncs.</div>';
+  const garminRows = state.wearableWorkouts.slice(0, 4).map((w) => `<div class="activity-row"><strong>${safe(w.name || title(w.sport))} · ${safe(minutesLabel(Math.round(w.duration_s / 60)))}</strong><br><small>${safe(dateLabel(w.started_at))} · Garmin import · Review only</small></div>`).join('');
   const noteKinds = { observation: 'Training response', preference: 'Preference', goal: 'Goal', constraint: 'Constraint' };
   const noteRows = data.coach_notes?.length ? data.coach_notes.map((n) => `<div class="note-row"><div><small>${safe(noteKinds[n.kind] || 'Note')} · ${n.author_id === state.athleteId ? 'Athlete' : 'Coach'} · ${n.visibility === 'coach_private' ? 'Only you' : 'Shared'} · ${safe(dateLabel(n.created_at))}</small><p>${safe(n.body)}</p></div>${isSelf || n.author_id === session()?.user?.id ? `<button type="button" class="quiet small-button" data-archive-note="${safe(n.id)}">Archive</button>` : ''}</div>`).join('') : '<div class="list-empty"><strong>No athlete notes yet</strong><p>Add a training response, goal or preference so the assistant can consider it when drafting.</p><button type="button" class="secondary small-button" data-action="new-note">Add athlete note</button></div>';
   const plannedMinutes = workouts.reduce((sum, workout) => sum + (Number(workout.target_duration_min) || 0), 0);
@@ -244,7 +290,7 @@ function renderAthlete() {
     <div class="decision-strip"><span class="decision-marker" aria-hidden="true"></span><div><p class="eyebrow">COACH DECISION</p><strong>${workouts.length ? 'Review the plan before the next change.' : 'Start with a safe baseline week.'}</strong><p>${workouts.length ? 'Use the week below to check what is already planned. Coach sessions stay protected when Trainable replans open days.' : 'The assistant can prepare a conservative draft. You and your coach review every day before it reaches the athlete.'}</p></div></div>
     <div class="metrics" aria-label="Athlete training measures">${cells.map((c) => `<div class="metric"><span>${safe(c[0])}</span><strong>${safe(c[1])}</strong><small>${safe(c[2])}</small></div>`).join('')}</div>
     <section class="week-section"><div class="section-head"><div><p class="eyebrow">THE PLAN</p><h3>Training calendar</h3></div><div class="calendar-controls"><button type="button" class="secondary small-button" data-week-shift="-1" aria-label="Previous week" ${week === currentWeek() ? 'disabled' : ''}>←</button><span>${week === currentWeek() ? 'This week' : 'Next week'} · ${safe(dateLabel(week))}–${safe(weekEnd)}</span><button type="button" class="secondary small-button" data-week-shift="1" aria-label="Next week" ${week === nextWeek() ? 'disabled' : ''}>→</button></div></div><div class="week-summary"><div><strong>${safe(trainingMinutesLabel(plannedMinutes))}</strong><span>planned</span></div><div><strong>${workouts.length}</strong><span>${workouts.length === 1 ? 'session' : 'sessions'}</span></div><div><strong>${Math.max(0, 7 - new Set(workouts.map((w) => w.day_of_week)).size)}</strong><span>days without sessions</span></div></div><div class="calendar-grid" role="group" aria-label="Week of ${safe(dateLabel(week))}">${calendarDays}</div><div class="selected-day"><div class="selected-day-heading"><div><p class="eyebrow">SELECTED DAY</p><h4>${safe(DAYS[state.calendarDay])}, ${safe(dateLabel(selectedDate))}</h4></div>${canAddDay ? `<button type="button" class="secondary small-button" data-add-calendar-day="${state.calendarDay}">Add workout</button>` : week === nextWeek() ? '<button type="button" class="secondary small-button" data-action="build-week">Plan next week</button>' : ''}</div>${selectedDayRows}</div><p class="foot-note">A saved workout also appears in the athlete app.</p></section>
-    <div class="athlete-content"><div class="planning-column"><section class="recent-section"><div class="section-head"><div><p class="eyebrow">THE EVIDENCE</p><h3>Recent training</h3></div></div><div class="activity-list">${activityRows}</div></section></div>
+    <div class="athlete-content"><div class="planning-column"><section class="recent-section"><div class="section-head"><div><p class="eyebrow">THE EVIDENCE</p><h3>Recent training</h3></div></div><div class="activity-list">${activityRows}</div>${garminRows ? `<div class="garmin-preview"><p class="eyebrow">GARMIN / REVIEW ONLY</p><div class="activity-list">${garminRows}</div><p class="foot-note">Imported Garmin workouts are separate from load calculations while duplicate sources are checked.</p></div>` : ''}</section></div>
       <div class="context-column"><section class="profile-notes"><div class="section-head"><div><p class="eyebrow">WHAT THE COACH KNOWS</p><h3>Athlete notes</h3></div><button type="button" class="quiet small-button" data-action="new-note">Add note</button></div><p class="helper">Record goals, preferences and training responses. The assistant can use relevant notes when AI sharing is allowed.</p><div class="meeting-list">${noteRows}</div></section>
       <section class="calls-section"><div class="section-head"><div><p class="eyebrow">FROM THE CONVERSATION</p><h3>Coach calls</h3></div><button type="button" class="quiet small-button" data-action="new-meeting">Add call notes</button></div><div class="meeting-list">${meetingRows}</div></section></div>
     </div>`;
@@ -617,6 +663,31 @@ $('#sign-out').addEventListener('click', async () => {
 $('#retry-workspace').addEventListener('click', resumeWorkspace);
 $('#show-attention').addEventListener('click', showAttention);
 $('#show-athletes').addEventListener('click', () => showAthletes());
+$('#show-devices').addEventListener('click', showDevices);
+$('#devices-content').addEventListener('click', async (event) => {
+  const button = event.target.closest('button'); if (!button) return;
+  if (button.hasAttribute('data-device-retry')) { await showDevices(); return; }
+  if (button.hasAttribute('data-device-remove')) {
+    state.removeGarminTrigger = button; $('#remove-garmin-dialog').showModal(); $('#keep-garmin').focus(); return;
+  }
+  if (button.hasAttribute('data-device-connect')) {
+    button.disabled = true; button.textContent = 'Opening Garmin…';
+    try { const result = await wearables('connect'); location.assign(result.authorization_url); }
+    catch (error) { button.disabled = false; button.textContent = 'Connect Garmin'; setStatus(error.message, true); }
+  }
+  if (button.hasAttribute('data-device-sync')) {
+    button.disabled = true; button.textContent = 'Importing…';
+    try { const result = await wearables('sync'); await showDevices();
+      setStatus(result.has_more ? 'Imported the first batch. Import again for older workouts.' : `Garmin import finished: ${result.imported} workouts checked.`); }
+    catch (error) { button.disabled = false; button.textContent = 'Import latest workouts'; setStatus(error.message, true); }
+  }
+});
+$('#remove-garmin-dialog').addEventListener('close', async () => {
+  const trigger = state.removeGarminTrigger; state.removeGarminTrigger = null;
+  if ($('#remove-garmin-dialog').returnValue !== 'confirm') { trigger?.focus(); return; }
+  try { await wearables('remove'); await showDevices(); setStatus('Garmin connection and imported data removed.'); $('#show-devices').focus(); }
+  catch (error) { setStatus(error.message, true); trigger?.focus(); }
+});
 $('#refresh-attention').addEventListener('click', showAttention);
 $('.attention-filters').addEventListener('click', (event) => {
   const filter = event.target.closest('[data-attention-filter]')?.dataset.attentionFilter;
@@ -663,6 +734,7 @@ $('#roster-list').addEventListener('keydown', (event) => {
 addEventListener('popstate', () => {
   const route = location.hash.slice(1).split('/');
   if (route[0] === 'attention') { showAttention(); return; }
+  if (route[0] === 'devices') { showDevices(); return; }
   if (route[0] === 'team' || !route[0]) { showAthletes(false); state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); return; }
   if (route[0] === 'athlete' && state.roster.some((p) => p.id === route[1])) { showAthletes(false, false); selectAthlete(route[1], { openDetail: true, updateRoute: false }); }
 });

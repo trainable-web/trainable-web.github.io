@@ -9,8 +9,8 @@
     <meta name="application-name" content="Trainable Coach" />
     <meta name="apple-mobile-web-app-title" content="Trainable Coach" />
     <link rel="icon" href="../assets/trainable-mark-dark.png" type="image/png" />
-    <link rel="stylesheet" href="./styles.css?v=20261005-attention" />
-    <script src="./app.js?v=20261005-attention-polish" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=20261005-devices" />
+    <script src="./app.js?v=20261005-devices" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -43,10 +43,11 @@
     </main>
 
     <main id="workspace" class="workspace" hidden>
-      <div class="workspace-head"><div><p class="eyebrow">TRAINABLE / COACH DESK</p><h1>Your coaching day<span class="heading-period">.</span></h1><p class="subtle">See what needs a decision, then open the athlete behind it.</p></div><div class="head-actions"><button id="invite-coach" class="secondary" type="button">Invite a coach</button><button id="join-team" class="secondary" type="button">Join a team</button></div></div>
-      <nav class="workspace-nav" aria-label="Coach workspace"><button type="button" id="show-attention" class="workspace-nav-item" aria-current="page">Attention</button><button type="button" id="show-athletes" class="workspace-nav-item">Athletes</button></nav>
+      <div class="workspace-head"><div><p class="eyebrow">TRAINABLE / COACH DESK</p><h1 id="workspace-title">Your coaching day<span class="heading-period">.</span></h1><p id="workspace-subtitle" class="subtle">See what needs a decision, then open the athlete behind it.</p></div><div class="head-actions"><button id="invite-coach" class="secondary" type="button">Invite a coach</button><button id="join-team" class="secondary" type="button">Join a team</button></div></div>
+      <nav class="workspace-nav" aria-label="Coach workspace"><button type="button" id="show-attention" class="workspace-nav-item" aria-current="page">Attention</button><button type="button" id="show-athletes" class="workspace-nav-item">Athletes</button><button type="button" id="show-devices" class="workspace-nav-item">Devices</button></nav>
       <p id="global-status" class="status" role="status"></p>
       <section id="attention-view" class="attention-view" aria-labelledby="attention-title"><div class="attention-head"><div><p class="eyebrow">TODAY / REVIEW QUEUE</p><h2 id="attention-title">What needs your attention</h2><p>Checking recent energy check-ins, next week’s plan, and activity availability. Your judgment decides the next step.</p></div><button id="refresh-attention" type="button" class="secondary">Refresh</button></div><div id="attention-summary" class="attention-summary" aria-live="polite"></div><p id="attention-coverage" class="attention-coverage" hidden></p><div class="attention-filters" role="group" aria-label="Attention filter"><button type="button" data-attention-filter="open" aria-pressed="true">Open</button><button type="button" data-attention-filter="all" aria-pressed="false">All</button><button type="button" data-attention-filter="reviewed" aria-pressed="false">Reviewed</button></div><div id="attention-list" class="attention-list" aria-live="polite"></div></section>
+      <section id="devices-view" class="devices-view" aria-labelledby="devices-title" hidden><div class="devices-heading"><p class="eyebrow">YOUR ACCOUNT / DATA SOURCES</p><h2 id="devices-title">Device connections</h2><p>Choose what your account shares with Trainable. Your coach can review imported training when you give them access.</p></div><div id="devices-content" aria-live="polite"></div></section>
       <div class="split-pane">
         <aside class="roster-pane" aria-labelledby="roster-title"><div class="pane-heading"><h2 id="roster-title">Roster</h2><span id="roster-count"></span></div><div class="roster-search"><label for="roster-query">Find an athlete</label><input id="roster-query" type="search" placeholder="Search by name" autocomplete="off" /></div><div id="roster-list" class="roster-list" aria-label="Athletes"></div><div class="roster-foot">Select an athlete to review their week and coaching context.</div></aside>
         <section id="athlete-pane" class="athlete-pane" aria-live="polite" tabindex="-1"></section>
@@ -59,5 +60,6 @@
     <dialog id="discard-dialog"><form method="dialog"><h2>Discard this draft?</h2><p>Your unsaved changes to this page will be lost.</p><div class="dialog-actions"><button id="keep-draft" value="cancel" class="secondary">Keep editing</button><button value="confirm" class="danger">Discard draft</button></div></form></dialog>
     <dialog id="archive-note-dialog"><form method="dialog"><h2>Archive this athlete note?</h2><p>It will stop appearing in the profile and future assistant drafts.</p><div class="dialog-actions"><button id="keep-note" value="cancel" class="secondary">Keep note</button><button value="confirm" class="danger">Archive note</button></div></form></dialog>
     <dialog id="reset-week-dialog" aria-labelledby="reset-week-title" aria-describedby="reset-week-copy"><form method="dialog"><h2 id="reset-week-title">Delete planned week?</h2><p id="reset-week-copy"></p><div class="dialog-actions"><button id="cancel-reset-week" value="cancel" class="secondary">Keep week</button><button value="confirm" class="danger">Delete and rebuild week</button></div></form></dialog>
+    <dialog id="remove-garmin-dialog" aria-labelledby="remove-garmin-title"><form method="dialog"><h2 id="remove-garmin-title">Remove Garmin Connect?</h2><p>This removes the Garmin connection and imported Garmin workouts from Trainable. Your Strava and Apple Health data stays as it is.</p><div class="dialog-actions"><button id="keep-garmin" value="cancel" class="secondary">Keep Garmin</button><button value="confirm" class="danger">Remove Garmin data</button></div></form></dialog>
   </body>
 </html>
