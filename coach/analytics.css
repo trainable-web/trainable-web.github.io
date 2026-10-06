@@ -35,6 +35,8 @@
 .execution-review { margin: 14px 0 22px; padding: 16px; border: 1px solid var(--line); background: #f8faf7; }
 .execution-review h4 { margin: 0 0 8px; }
 .execution-review .activity-values { margin: 12px 0; }
+.assessment-refresh { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0 20px; }
+.assessment-refresh span { color: var(--muted); font-size: 13px; }
 .activity-link-choices { margin: 12px 0; padding: 12px; border: 1px solid var(--line); background: #f8faf7; }
 .activity-link-choices>strong { display: block; margin-bottom: 8px; }
 .activity-link-choices>div { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }

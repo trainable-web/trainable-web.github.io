@@ -205,7 +205,7 @@ function plannedComparison(d) {
   const stepRows = intervals.map((r, i) => [safe('Work interval ' + (i + 1)),numberLabel(r.duration_s,' s'),r.planned_low == null ? '—' : `${numberLabel(r.planned_low)}–${numberLabel(r.planned_high)}`,numberLabel(r.actual_avg),numberLabel(r.actual_hr,' bpm'),safe(title(r.position || 'Unavailable'))]);
   const assessmentMarkup = assessment ? `<div class="execution-review"><h4>Session assessment</h4><p><strong>${safe(assessment.headline || title(assessment.verdict))}</strong>${assessment.assessed_at ? ` <small>· ${safe(utcLabel(assessment.assessed_at))}</small>` : ''}</p>${assessment.detail ? `<p class="helper">${safe(assessment.detail)}</p>` : ''}<dl class="activity-values"><div><dt>Work intervals in target</dt><dd>${assessment.work_steps ? `${numberLabel(assessment.steps_in_band)} / ${numberLabel(assessment.work_steps)}` : '—'}</dd></div><div><dt>Power / HR decoupling</dt><dd>${numberLabel(assessment.decoupling_pct,'%',1)}</dd></div><div><dt>Efficiency factor</dt><dd>${numberLabel(assessment.efficiency_factor,'',2)}</dd></div><div><dt>EF vs baseline</dt><dd>${numberLabel(assessment.ef_vs_baseline_pct,'%',1)}</dd></div></dl>${stepRows.length ? `<h4>Work interval comparison</h4>${tableMarkup(['Interval','Planned time','Target band','Recorded average','Avg HR','Result'],stepRows)}` : '<p class="helper">No graded work intervals. The session may be unstructured or missing the trace needed for comparison.</p>'}<p class="helper">Automated assessment from saved traces and the linked prescription. Inspect the intervals and context before changing training.</p></div>` : '<p class="helper">No session assessment is saved for this activity.</p>';
   const linkChoices = candidates.length ? `<div class="activity-link-choices"><strong>Planned on this date</strong>${candidates.map((w) => `<div><span>${safe(w.headline || title(w.workout_type))} · ${safe(minutesLabel(w.target_duration_min))}</span><button type="button" class="secondary" data-link-activity="${safe(w.id)}">Link to this activity</button></div>`).join('')}<p class="helper">Choose only the session this activity actually fulfilled. Linking refreshes the execution assessment; it does not mark the workout complete.</p><p id="activity-link-status" role="status"></p></div>` : '';
-  return `${p ? `<p class="helper">Linked planned workout: ${safe(p.headline || title(p.workout_type) || 'Workout')}.</p>${tableMarkup(['Measure','Planned','Recorded'],rows)}${p.session_rpe == null ? '' : `<p>Session RPE: <strong>${numberLabel(p.session_rpe,' / 10',1)}</strong></p>`}${p.description ? `<p class="preserve-lines">${safe(p.description)}</p>` : ''}` : '<p class="helper">No planned workout is linked to this activity. Same-date sessions are not assumed to match.</p>'}${linkChoices}${assessmentMarkup}`;
+  return `${p ? `<p class="helper">Linked planned workout: ${safe(p.headline || title(p.workout_type) || 'Workout')}.</p>${tableMarkup(['Measure','Planned','Recorded'],rows)}${p.session_rpe == null ? '' : `<p>Session RPE: <strong>${numberLabel(p.session_rpe,' / 10',1)}</strong></p>`}${p.description ? `<p class="preserve-lines">${safe(p.description)}</p>` : ''}` : '<p class="helper">No planned workout is linked to this activity. Same-date sessions are not assumed to match.</p>'}${linkChoices}${assessmentMarkup}<p class="assessment-refresh"><button type="button" class="secondary" data-refresh-assessment>Refresh assessment</button><span id="assessment-refresh-status" role="status"></span></p>`;
 }
 function comparableMarkup(d) {
   const a = d.activity, rows = d.comparable_activities || [], c = d.comparison_criteria;
@@ -315,6 +315,7 @@ document.addEventListener('click', (event) => {
   if (el.dataset.trace) { const key = el.dataset.trace, visible = analysis.traceVisible; if (visible.includes(key) && visible.length > 1) analysis.traceVisible = visible.filter((k) => k !== key); else if (!visible.includes(key)) analysis.traceVisible = [...visible,key]; document.querySelectorAll('[data-trace]').forEach((b) => b.setAttribute('aria-pressed',analysis.traceVisible.includes(b.dataset.trace))); paintTrace(); }
   if (el.hasAttribute('data-lap-from')) { $('#segment-from').value = el.dataset.lapFrom; $('#segment-to').value = el.dataset.lapTo; analyzeSegment(); $('#activity-traces').scrollIntoView({block:'start'}); $('#segment-from').focus({preventScroll:true}); }
   if (el.hasAttribute('data-link-activity')) linkActivity(el.dataset.linkActivity, el);
+  if (el.hasAttribute('data-refresh-assessment')) refreshActivityAssessment(el);
   if (el.dataset.segmentPreset && analysis.detail?.stream_duration_s) { const max = analysis.detail.stream_duration_s, half = max/2; $('#segment-from').value = el.dataset.segmentPreset === 'second' ? half : 0; $('#segment-to').value = el.dataset.segmentPreset === 'first' ? half : max; analyzeSegment(); }
   if (el.hasAttribute('data-reset-trace')) { analysis.traceRange = null; paintTrace(); }
   if (el.hasAttribute('data-ai-activity')) analyzeActivityAI(el);
@@ -323,6 +324,18 @@ document.addEventListener('click', (event) => {
   if (el.hasAttribute('data-backfill-strava')) backfillStravaHistory();
   if (el.hasAttribute('data-fetch-traces')) fetchActivityDetail(el);
 });
+async function refreshActivityAssessment(button) {
+  const activityId = analysis.detail?.activity?.id, athleteId = state.athleteId, status = $('#assessment-refresh-status');
+  if (!activityId || !status) return;
+  button.disabled = true; status.textContent = 'Calculating from saved traces…';
+  try {
+    await portal('refresh_activity_assessment',{athlete_id:athleteId,activity_id:activityId});
+    if (analysis.detail?.activity?.id !== activityId || state.athleteId !== athleteId) return;
+    analysis.detail = await portal('activity_detail',{athlete_id:athleteId,activity_id:activityId});
+    renderActivity();
+    $('#assessment-refresh-status').textContent = 'Updated from the saved activity and linked plan.';
+  } catch (error) { if (status.isConnected) { status.textContent = error.message; button.disabled = false; } }
+}
 async function linkActivity(workoutId, button) {
   const activityId = analysis.detail?.activity?.id, athleteId = state.athleteId, status = $('#activity-link-status');
   if (!activityId || !status) return;
