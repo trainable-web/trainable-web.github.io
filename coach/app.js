@@ -15,7 +15,7 @@ const state = { roster: [], athleteId: null, athlete: null, builder: null, meeti
   wearableWorkouts: [], removeGarminTrigger: null, intervals: null, removeIntervalsTrigger: null };
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
-const title = (value) => String(value ?? '').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
+const title = (value) => String(value ?? '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
 const dateLabel = (iso) => iso ? new Date(iso.includes('T') ? iso : iso + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
 const minutesLabel = (n) => n ? (n >= 60 ? Math.floor(n / 60) + 'h ' + (n % 60 ? (n % 60) + 'm' : '') : n + 'm') : 'Rest';
 const trainingMinutesLabel = (n) => n ? minutesLabel(n) : '0m';
