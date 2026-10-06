@@ -257,8 +257,8 @@ function renderActivity() {
     <h3>Power-duration bests for this activity</h3><p class="helper">Saved best average power for each duration in this activity${a.device_watts !== true ? '; power may be estimated' : ''}.</p>${tableMarkup(['Duration','Best average power'],curve.map(([s,w]) => [elapsedLabel(Number(s)),numberLabel(w,' W')]),'No power-duration record saved.')}${a.ai_insight ? `<details class="data-disclosure"><summary>Saved AI interpretation</summary><p class="helper">${safe(a.ai_insight_generated_at ? utcLabel(a.ai_insight_generated_at) : '')} · Interpretation, not a recorded measurement.</p><p class="preserve-lines">${safe(typeof a.ai_insight === 'string' ? a.ai_insight : JSON.stringify(a.ai_insight))}</p></details>` : ''}`;
   paintTrace();
 }
-// Centered, time-based average of the displayed points. Missing values and recording gaps
-// start a new window; recorded samples and calculated statistics are never changed.
+// Centered, time-based average of the displayed points. The preview inserts nulls at
+// missing values and actual recording gaps; those nulls start a new window.
 function smoothTracePoints(points, windowSeconds) {
   if (!windowSeconds) return points;
   const result = points.map(([time,value]) => [time,value]);
@@ -266,7 +266,7 @@ function smoothTracePoints(points, windowSeconds) {
   while (start < points.length) {
     if (!Number.isFinite(points[start][1])) { start++; continue; }
     let end = start + 1;
-    while (end < points.length && Number.isFinite(points[end][1]) && points[end][0] - points[end-1][0] <= 10) end++;
+    while (end < points.length && Number.isFinite(points[end][1])) end++;
     let left = start, right = start, sum = 0;
     const half = windowSeconds / 2;
     for (let i = start; i < end; i++) {
@@ -282,7 +282,7 @@ function paintTrace() {
   const d = analysis.detail, keys = analysis.traceVisible.filter((key) => d.channels[key]?.length), samples = d.cursor_samples || [];
   const bounds = analysis.traceRange || [0, d.stream_duration_s || Math.max(...keys.map((key) => d.channels[key].at(-1)?.[0] || 0))];
   const colors = {watts:'#2c6588',heartrate:'#ad622a',cadence:'#477343',velocity_ms:'#795c9b',altitude_m:'#777b42',distance_m:'#705d50',temperature_c:'#aa5261',grade_pct:'#955b31'};
-  $('#activity-trace').innerHTML = keys.length ? `<div class="trace-range-heading"><strong>${analysis.traceRange ? 'Focused: ' + elapsedLabel(bounds[0]) + '–' + elapsedLabel(bounds[1]) + ' · ' + elapsedLabel(bounds[1]-bounds[0]) : 'Full recorded activity'}</strong>${analysis.traceRange ? '<button type="button" class="secondary" data-reset-trace>Reset chart</button>' : ''}</div><output id="trace-selection-preview" class="trace-selection-preview">Drag across a chart to select a range.</output><div class="trace-stack">${keys.map((key) => { const points = d.channels[key].map(([t,v]) => [t,displayTraceValue(key,v)]); return `<section class="trace-track"><h4>${TRACE_LABELS[key][0]} <small>(${TRACE_LABELS[key][1]})</small></h4>${dataChart([{name:TRACE_LABELS[key][0],color:colors[key],points:key === 'distance_m' ? points : smoothTracePoints(points,analysis.traceSmoothing)}],TRACE_LABELS[key][0],TRACE_LABELS[key][1],10,bounds,samples[0]?.time_s ?? 0)}</section>`; }).join('')}</div>${samples.length ? `<div class="trace-inspector"><label for="trace-position">Inspect the same recorded time across tracks</label><input id="trace-position" type="range" min="0" max="${samples.length-1}" value="0" step="1"><output id="trace-reading" for="trace-position" aria-live="polite"></output><p class="helper">Inspection uses up to 800 aligned stored samples. Segment analysis below uses every stored sample.</p><button type="button" class="secondary" data-export-trace>Export inspected samples (CSV)</button></div>` : ''}` : '<div class="chart-empty">No recorded trace available.</div>';
+  $('#activity-trace').innerHTML = keys.length ? `<div class="trace-range-heading"><strong>${analysis.traceRange ? 'Focused: ' + elapsedLabel(bounds[0]) + '–' + elapsedLabel(bounds[1]) + ' · ' + elapsedLabel(bounds[1]-bounds[0]) : 'Full recorded activity'}</strong>${analysis.traceRange ? '<button type="button" class="secondary" data-reset-trace>Reset chart</button>' : ''}</div><output id="trace-selection-preview" class="trace-selection-preview">Drag across a chart to select a range.</output><div class="trace-stack">${keys.map((key) => { const points = d.channels[key].map(([t,v]) => [t,displayTraceValue(key,v)]); return `<section class="trace-track"><h4>${TRACE_LABELS[key][0]} <small>(${TRACE_LABELS[key][1]})</small></h4>${dataChart([{name:TRACE_LABELS[key][0],color:colors[key],points:key === 'distance_m' ? points : smoothTracePoints(points,analysis.traceSmoothing)}],TRACE_LABELS[key][0],TRACE_LABELS[key][1],Infinity,bounds,samples[0]?.time_s ?? 0)}</section>`; }).join('')}</div>${samples.length ? `<div class="trace-inspector"><label for="trace-position">Inspect the same recorded time across tracks</label><input id="trace-position" type="range" min="0" max="${samples.length-1}" value="0" step="1"><output id="trace-reading" for="trace-position" aria-live="polite"></output><p class="helper">Inspection uses up to 800 aligned stored samples. Segment analysis below uses every stored sample.</p><button type="button" class="secondary" data-export-trace>Export inspected samples (CSV)</button></div>` : ''}` : '<div class="chart-empty">No recorded trace available.</div>';
   if (samples.length) {
     const center = analysis.traceRange ? (bounds[0] + bounds[1]) / 2 : samples[0].time_s;
     let index = 0; for (let i = 1; i < samples.length; i++) if (Math.abs(samples[i].time_s-center) < Math.abs(samples[index].time_s-center)) index = i;
