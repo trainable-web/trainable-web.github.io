@@ -745,7 +745,9 @@ $('#devices-content').addEventListener('click', async (event) => {
 $('#remove-intervals-dialog').addEventListener('close', async () => {
   const trigger = state.removeIntervalsTrigger; state.removeIntervalsTrigger = null;
   if ($('#remove-intervals-dialog').returnValue !== 'confirm') { trigger?.focus(); return; }
-  try { await intervals('disconnect'); await showDevices(); setStatus('Intervals.icu disconnected and imported wellness deleted.'); $('#show-devices').focus(); }
+  try { const result = await intervals('disconnect'); await showDevices();
+    setStatus(result.revocation_pending ? 'Imported data deleted. Intervals.icu access revocation is queued for retry.' : 'Intervals.icu disconnected and imported data deleted.');
+    $('#show-devices').focus(); }
   catch (error) { setStatus(error.message, true); trigger?.focus(); }
 });
 $('#remove-garmin-dialog').addEventListener('close', async () => {
