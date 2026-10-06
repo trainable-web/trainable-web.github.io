@@ -11,8 +11,8 @@ const TYPES = [['warmup', 'Warm-up'], ['work', 'Work'], ['recovery', 'Recovery']
 const state = { roster: [], athleteId: null, athlete: null, builder: null, meeting: null, weekDraft: null, weekSelection: null,
   sharedWith: [], trigger: null, editorDirty: false, noteToArchive: null, weekReset: null, resetTrigger: null,
   weekGenerating: false, weekPublishing: false, weekResetting: false, noteSaving: false, mobileDetailOpen: false, athleteRequest: 0,
-  calendarWeek: null, calendarDay: null, calendarLayout: innerWidth < 768 ? 'agenda' : 'week', calendarRecords: {}, athleteSection: 'analysis', attention: null, attentionFilter: 'open', devices: null,
-  wearableWorkouts: [], removeGarminTrigger: null, intervals: null, removeIntervalsTrigger: null };
+  calendarWeek: null, calendarMonth: null, calendarDay: null, calendarLayout: innerWidth < 768 ? 'agenda' : 'month', calendarRecords: {}, athleteSection: 'calendar', attention: null, attentionFilter: 'open', devices: null,
+  wearableWorkouts: [], removeGarminTrigger: null, intervals: null, removeIntervalsTrigger: null, season: null, seasonRequest: 0, libraryQuery: '' };
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const title = (value) => String(value ?? '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
@@ -274,7 +274,7 @@ function renderRoster() {
 async function selectAthlete(id, options = {}) {
   if (!id) { $('#athlete-pane').innerHTML = '<div class="list-empty"><h2>Connect your first athlete</h2><p>Use an invite code from the athlete to open their training calendar.</p><button type="button" class="primary" data-action="connect-athlete">Connect an athlete</button></div>'; return; }
   const request = ++state.athleteRequest;
-  if (id !== state.athleteId) { state.calendarWeek = currentWeek(); state.calendarDay = null; state.athleteSection = 'analysis'; }
+  if (id !== state.athleteId) { state.calendarWeek = currentWeek(); state.calendarMonth = localDate().slice(0,7); state.calendarDay = null; state.athleteSection = 'calendar'; }
   if (options.openDetail != null) {
     state.mobileDetailOpen = options.openDetail;
     $('#workspace').classList.toggle('mobile-detail-open', state.mobileDetailOpen);
@@ -285,7 +285,7 @@ async function selectAthlete(id, options = {}) {
     const [athlete, imported] = await Promise.all([portal('read_athlete', { athlete_id: id }),
       wearables('workouts', { athlete_id: id }).catch(() => ({ workouts: [] }))]);
     if (request !== state.athleteRequest) return;
-    state.athlete = athlete; state.wearableWorkouts = imported.workouts || [];
+    state.athlete = athlete; state.wearableWorkouts = imported.workouts || []; state.season = null; state.seasonRequest++;
     if (options.updateRoute !== false && location.hash !== '#athlete/' + id) history[options.pushRoute ? 'pushState' : 'replaceState'](null, '', '#athlete/' + id);
     renderAthlete();
   } catch (error) { if (request === state.athleteRequest) $('#athlete-pane').innerHTML = '<div class="list-empty"><h2>Could not load this athlete</h2><p>' + safe(error.message) + '</p><button type="button" class="secondary" data-action="retry-athlete">Try again</button></div>'; }
@@ -293,7 +293,7 @@ async function selectAthlete(id, options = {}) {
 function renderAthlete() {
   const data = state.athlete; if (!data) return;
   const p = data.profile || {}; const isSelf = state.roster.find((r) => r.id === state.athleteId)?.is_self;
-  const week = state.calendarWeek || currentWeek(); state.calendarWeek = week;
+  const week = state.calendarWeek || currentWeek(); state.calendarWeek = week; state.calendarMonth ||= localDate().slice(0,7);
   const plan = data.plans.find((x) => x.week_start_date === week);
   const workouts = data.workouts.filter((x) => x.plan_id === plan?.id);
   const name = p.display_name || (isSelf ? 'Your training' : 'Athlete');
@@ -313,14 +313,20 @@ function renderAthlete() {
     <button type="button" class="mobile-back quiet" data-action="back-to-roster">← All athletes</button>
     <header class="athlete-top"><div class="athlete-identity"><h2>${safe(name)}</h2><p>${safe(title(p.primary_sport || 'Training'))}${isSelf ? ' · Your training' : ' · Athlete'}</p></div><div class="athlete-actions">${week >= currentWeek() ? `<button type="button" class="primary" data-action="new-workout">Add workout</button><button type="button" class="secondary" data-action="build-week">Plan week</button>` : '<button type="button" class="secondary" data-action="this-week">Go to this week</button>'}</div></header>
     <div class="metrics" aria-label="Athlete training measures">${cells.map((c) => `<div class="metric"><span>${safe(c[0])}</span><strong>${safe(c[1])}</strong><small>${safe(c[2])}</small></div>`).join('')}</div>
-    <p class="load-timestamp">${metrics?.metric_date ? 'Training load last recorded: ' + safe(utcLabel(metrics.metric_date)) : 'No training-load record available.'} Modeled load may include estimates; review the data behind it before planning.</p><div class="athlete-section-nav" role="group" aria-label="Athlete view">${[['analysis','Activity & trends'],['calendar','Calendar'],['profile','Athlete profile'],['notes','Notes & calls'],['tools','Coaching tools']].map(([value,label]) => `<button type="button" data-athlete-section="${value}" aria-pressed="${section === value}">${label}</button>`).join('')}</div>
-    <section class="week-section" ${section !== 'calendar' ? 'hidden' : ''}>${renderCalendar(week, workouts)}</section>
+    <p class="load-timestamp">${metrics?.metric_date ? 'Training load last recorded: ' + safe(utcLabel(metrics.metric_date)) : 'No training-load record available.'} Modeled load may include estimates; review the data behind it before planning.</p><div class="athlete-section-nav" role="group" aria-label="Athlete view">${[['calendar','Calendar'],['analysis','Activity & trends'],['season','Season'],['library','Workouts'],['profile','Athlete profile'],['notes','Notes & calls'],['tools','Coaching tools']].map(([value,label]) => `<button type="button" data-athlete-section="${value}" aria-pressed="${section === value}">${label}</button>`).join('')}</div>
+    <section class="week-section" ${section !== 'calendar' ? 'hidden' : ''}>${state.calendarLayout === 'month' ? renderMonthCalendar(week) : renderCalendar(week, workouts)}</section>
     <section class="analysis-section" ${section !== 'analysis' ? 'hidden' : ''}>${section === 'analysis' ? analysisMarkup() : ''}</section>
+    <section class="season-section" ${section !== 'season' ? 'hidden' : ''}>${section === 'season' ? seasonMarkup() : ''}</section>
+    <section class="library-section" ${section !== 'library' ? 'hidden' : ''}>${section === 'library' ? libraryMarkup() : ''}</section>
     <section ${section !== 'profile' ? 'hidden' : ''}>${section === 'profile' ? profileMarkup() : ''}</section>
     <section ${section !== 'tools' ? 'hidden' : ''}><h3>Coaching tools</h3><p class="helper">Choose the task you need. AI suggestions are always reviewed before saving.</p><div class="coaching-tools">${[['new-workout','Create workout','Set the title, instructions and training blocks yourself.'],['ai-workout','Draft workout with AI','Describe a session, then review and edit the proposed blocks.'],['build-week','Build or edit a week','Plan this week or next week and review before publishing.'],['review-week','Review this week with AI','Ask for one session adjustment using the athlete’s current context.'],['new-note','Add athlete note','Record training response, goals, preferences or constraints.'],['new-meeting','Log coach call','Save call notes and agreed changes; transcript assistance is optional.']].map(([action,label,description]) => `<button type="button" class="secondary" data-action="${action}"><strong>${label}</strong><span>${description}</span></button>`).join('')}</div></section>
     <div class="context-column" ${section !== 'notes' ? 'hidden' : ''}><section class="profile-notes"><div class="section-head"><h3>Athlete notes</h3><button type="button" class="secondary" data-action="new-note">Add note</button></div><div class="meeting-list">${noteRows}</div></section><section class="calls-section"><div class="section-head"><h3>Coach calls</h3><button type="button" class="secondary" data-action="new-meeting">Add call notes</button></div><div class="meeting-list">${meetingRows}</div></section></div>`;
   if (section === 'analysis') paintAnalysis();
-  if (section === 'calendar' && !state.calendarRecords[week]) loadCalendarActivities(week);
+  if (section === 'season' && !state.season) loadSeason();
+  if (section === 'calendar') {
+    const needed = state.calendarLayout === 'month' ? monthWeeks(state.calendarMonth) : [week];
+    needed.filter((item) => !state.calendarRecords[item]).forEach(loadCalendarActivities);
+  }
 }
 function calendarDate(week, day) {
   const date = new Date(week + 'T12:00:00'); date.setDate(date.getDate() + (day + 6) % 7);
@@ -328,9 +334,21 @@ function calendarDate(week, day) {
 }
 function calendarWeeks() {
   const oldestPlan = (state.athlete?.plans || []).map((p) => p.week_start_date).sort()[0];
-  const start = oldestPlan && oldestPlan < shiftUTC(currentWeek(), -364) ? oldestPlan : shiftUTC(currentWeek(), -364);
-  const weeks = []; for (let day = start; day <= nextWeek(); day = shiftUTC(day, 7)) weeks.push(day);
+  const start = oldestPlan && oldestPlan < shiftUTC(currentWeek(), -1092) ? oldestPlan : shiftUTC(currentWeek(), -1092);
+  const weeks = []; for (let day = start; day <= shiftUTC(nextWeek(), 42); day = shiftUTC(day, 7)) weeks.push(day);
   return weeks;
+}
+function mondayOf(date) { const d = new Date(date + 'T12:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2,'0'), String(d.getDate()).padStart(2,'0')].join('-'); }
+function monthWeeks(month) {
+  const start = mondayOf(month + '-01');
+  const last = new Date(Number(month.slice(0,4)), Number(month.slice(5,7)), 0).getDate();
+  const end = mondayOf(month + '-' + String(last).padStart(2,'0'));
+  const weeks = []; for (let day = start; day <= end; day = shiftUTC(day, 7)) weeks.push(day);
+  return weeks;
+}
+function shiftMonth(month, delta) {
+  const d = new Date(Number(month.slice(0,4)), Number(month.slice(5,7)) - 1 + delta, 1, 12);
+  return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0')].join('-');
 }
 function calendarLocalDay(value) {
   const d = new Date(value);
@@ -353,7 +371,7 @@ async function loadCalendarActivities(week) {
     if (athlete !== state.athleteId) return;
     state.calendarRecords[week] = { activities: [], error: error.message };
   }
-  if (state.athleteSection === 'calendar' && state.calendarWeek === week) renderAthlete();
+  if (state.athleteSection === 'calendar' && (state.calendarWeek === week || (state.calendarLayout === 'month' && monthWeeks(state.calendarMonth).includes(week)))) renderAthlete();
 }
 function workoutStatus(workout, date) {
   if (workout.completed) return ['completed', 'Completed'];
@@ -388,9 +406,93 @@ function renderCalendar(week, workouts) {
       return `<button type="button" class="workout-card ${status}" data-workout-preview="${safe(w.id)}"><span class="workout-card-kind">${safe(title(w.workout_type || 'Workout'))}</span><strong class="workout-card-title">${safe(w.headline || title(w.workout_type))}</strong><span class="workout-card-time">${safe(minutesLabel(w.target_duration_min))}</span>${load != null ? `<small>${Math.round(Number(load))} TSS</small>` : ''}${workoutChart(w)}<span class="workout-card-status">${w.completed ? '✓ ' : ''}${label}</span>${w.prescription_source === 'human_coach' ? '<small class="workout-card-source">Coach prescribed</small>' : ''}</button>`;
     }).join('')}${actual.map((a) => `<button type="button" class="calendar-activity" data-activity="${safe(a.id)}"><span class="calendar-activity-kind">Recorded · ${safe(title(a.strava_sport_type || a.sport_type))}</span><strong>${safe(a.name || title(a.strava_sport_type || a.sport_type) + ' activity')}</strong><span>${safe(elapsedLabel(a.duration_s))}${a.distance_m != null ? ' · ' + safe(numberLabel(a.distance_m / 1000, ' km', 1)) : ''}</span><small>${a.avg_power != null ? safe(numberLabel(a.avg_power, ' W')) : ''}${a.avg_power != null && a.avg_hr != null ? ' · ' : ''}${a.avg_hr != null ? safe(numberLabel(a.avg_hr, ' bpm')) : ''}</small></button>`).join('')}${!items.length && !actual.length ? `<p class="calendar-empty">${record?.loading ? 'Loading activities…' : date < today ? 'No session recorded' : 'No workout planned'}</p>` : ''}</div>${canAdd ? `<button type="button" class="calendar-add" data-add-calendar-day="${day}" aria-label="Add workout for ${DAYS[day]}, ${safe(dateLabel(date))}">+ Add</button>` : ''}</div>`;
   }).join('');
-  return `<div class="calendar-toolbar"><div class="calendar-controls"><button type="button" class="secondary" data-week-shift="-1" aria-label="Previous available week" ${index <= 0 ? 'disabled' : ''}>‹<span class="control-tooltip" role="tooltip">Previous available week</span></button><h3>${safe(dateLabel(week))} – ${safe(dateLabel(end))}<small>${week === currentWeek() ? 'This week' : week === nextWeek() ? 'Next week' : 'Earlier week'}</small></h3><button type="button" class="secondary" data-week-shift="1" aria-label="Next available week" ${index >= weeks.length - 1 ? 'disabled' : ''}>›<span class="control-tooltip" role="tooltip">Next available week</span></button><button type="button" class="quiet" data-action="this-week">Today</button><button type="button" class="quiet" data-calendar-retry>Refresh activities</button></div><div class="calendar-view-switch" role="group" aria-label="Calendar layout"><button type="button" data-calendar-layout="week" aria-pressed="${state.calendarLayout === 'week'}">Week</button><button type="button" data-calendar-layout="agenda" aria-pressed="${state.calendarLayout === 'agenda'}">Agenda</button></div></div>
+  return `<div class="calendar-toolbar"><div class="calendar-controls"><button type="button" class="secondary" data-week-shift="-1" aria-label="Previous available week" ${index <= 0 ? 'disabled' : ''}>‹<span class="control-tooltip" role="tooltip">Previous available week</span></button><h3>${safe(dateLabel(week))} – ${safe(dateLabel(end))}<small>${week === currentWeek() ? 'This week' : week === nextWeek() ? 'Next week' : 'Earlier week'}</small></h3><button type="button" class="secondary" data-week-shift="1" aria-label="Next available week" ${index >= weeks.length - 1 ? 'disabled' : ''}>›<span class="control-tooltip" role="tooltip">Next available week</span></button><button type="button" class="quiet" data-action="this-week">Today</button><button type="button" class="quiet" data-calendar-retry>Refresh activities</button></div><div class="calendar-view-switch" role="group" aria-label="Calendar layout"><button type="button" data-calendar-layout="month" aria-pressed="false">Month</button><button type="button" data-calendar-layout="week" aria-pressed="${state.calendarLayout === 'week'}">Week</button><button type="button" data-calendar-layout="agenda" aria-pressed="${state.calendarLayout === 'agenda'}">Agenda</button></div></div>
     ${state.calendarLayout === 'week' ? '<p class="calendar-scroll-hint">Scroll across the week, or choose Agenda for a list.</p>' : ''}${record?.error ? `<p class="data-warning" role="alert">Activities could not load: ${safe(record.error)} <button type="button" data-calendar-retry>Try again</button></p>` : ''}${record?.limited ? '<p class="data-warning">This week has more than 500 records. Some activities may be missing.</p>' : ''}<div class="calendar-body"><div class="calendar-grid planner-grid ${state.calendarLayout === 'agenda' ? 'agenda' : ''}" role="group" tabindex="0" aria-label="Training week of ${safe(dateLabel(week))}">${days}</div><aside class="calendar-summary" aria-label="Week summary"><h4>Week summary</h4><div class="summary-duration"><strong>${safe(trainingMinutesLabel(planned))}</strong><span>planned time</span></div><dl><div><dt>Recorded</dt><dd>${record?.loading ? 'Loading…' : safe(trainingMinutesLabel(Math.round(recordedSeconds / 60)))}</dd></div><div><dt>Activities</dt><dd>${record?.loading ? '—' : activities.length}</dd></div><div><dt>Planned TSS</dt><dd>${tssValues.length ? Math.round(tss) : '—'}</dd></div><div><dt>Planned sessions</dt><dd>${sessions.length}</dd></div><div><dt>Marked complete</dt><dd>${complete} / ${sessions.length}</dd></div></dl><progress max="${Math.max(sessions.length, 1)}" value="${complete}" aria-label="${complete} of ${sessions.length} sessions marked complete"></progress><p class="summary-caption">Recorded activities are independent of completion marks. Strava sessions use the activity’s local date when available; older records use your timezone.</p>${week === currentWeek() ? '<button type="button" class="secondary full" data-action="review-week">Suggest a change</button><p class="summary-caption">The assistant suggests one session change for your review.</p>' : editable ? '<p class="summary-caption">Use Plan week to draft and review next week before publishing.</p>' : '<p class="summary-caption">Browse prior weeks for recorded activities.</p>'}</aside></div>
     <div class="calendar-key" aria-label="Workout status key"><span><i class="key-planned"></i>Planned</span><span><i class="key-completed"></i>Marked complete</span><span><i class="key-actual"></i>Recorded activity</span><span>Open an activity for charts and laps.</span></div>`;
+}
+function renderMonthCalendar() {
+  const month = state.calendarMonth, today = localDate(), weeks = monthWeeks(month), plans = state.athlete?.plans || [], workouts = state.athlete?.workouts || [];
+  const monthName = new Date(month + '-15T12:00:00').toLocaleDateString(undefined,{month:'long',year:'numeric'});
+  const rows = weeks.map((week) => {
+    const plan = plans.find((p) => p.week_start_date === week);
+    const planned = workouts.filter((w) => w.plan_id === plan?.id);
+    const record = state.calendarRecords[week], activities = record?.activities || [];
+    const days = ORDER.map((day) => {
+      const date = calendarDate(week,day), items = planned.filter((w) => w.day_of_week === day), actual = activities.filter((a) => activityCalendarDay(a) === date);
+      const canAdd = (week === currentWeek() || week === nextWeek()) && date >= today && !items.length;
+      return `<div class="month-day ${date.slice(0,7) === month ? '' : 'outside-month'} ${date === today ? 'is-today' : ''}"><div class="month-day-heading"><strong>${Number(date.slice(-2))}</strong>${date === today ? '<span>Today</span>' : ''}</div>${items.map((w) => { const [status] = workoutStatus(w,date); return `<button type="button" class="month-event plan ${status}" data-workout-preview="${safe(w.id)}"><span class="month-event-type">Plan${w.completed ? ' ✓' : ''}</span><strong>${safe(w.headline || title(w.workout_type))}</strong><small>${safe(minutesLabel(w.target_duration_min))}${w.target_tss == null ? '' : ' · ' + Math.round(Number(w.target_tss)) + ' TSS'}</small>${workoutChart(w)}</button>`; }).join('')}${actual.map((a) => `<button type="button" class="month-event recorded" data-activity="${safe(a.id)}"><span class="month-event-type">Recorded · ${safe(title(a.strava_sport_type || a.sport_type))}</span><strong>${safe(a.name || title(a.sport_type))}</strong><small>${safe(elapsedLabel(a.duration_s))}${a.avg_power == null ? '' : ' · ' + safe(numberLabel(a.avg_power,' W'))}</small></button>`).join('')}${canAdd ? `<button type="button" class="month-add" data-add-calendar-day="${day}" data-add-week="${week}" aria-label="Add workout on ${safe(dateLabel(date))}">+ Add workout</button>` : ''}${!items.length && !actual.length && record?.loading ? '<small class="month-loading">Loading…</small>' : ''}</div>`;
+    }).join('');
+    const plannedMinutes = planned.reduce((n,w) => n + (Number(w.target_duration_min)||0),0), actualSeconds = activities.reduce((n,a) => n + (Number(a.duration_s)||0),0);
+    const plannedTss = planned.reduce((n,w) => n + (Number(w.target_tss ?? w.computed_tss)||0),0);
+    return `<div class="month-week" role="row">${days}<aside class="month-week-summary"><strong>${safe(dateLabel(week))}–${safe(dateLabel(calendarDate(week,0)))}</strong><dl><div><dt>Planned</dt><dd>${safe(trainingMinutesLabel(plannedMinutes))}</dd></div><div><dt>Recorded</dt><dd>${record?.loading ? 'Loading…' : safe(trainingMinutesLabel(Math.round(actualSeconds/60)))}</dd></div><div><dt>Sessions</dt><dd>${activities.length} recorded</dd></div><div><dt>Planned TSS</dt><dd>${plannedTss ? Math.round(plannedTss) : '—'}</dd></div></dl>${record?.error ? `<small role="alert">Activity load failed. <button type="button" data-calendar-retry-week="${safe(week)}">Retry</button></small>` : ''}</aside></div>`;
+  }).join('');
+  return `<div class="calendar-toolbar"><div class="calendar-controls"><button type="button" class="secondary" data-month-shift="-1" aria-label="Previous month">‹</button><h3>${safe(monthName)}</h3><button type="button" class="secondary" data-month-shift="1" aria-label="Next month">›</button><button type="button" class="quiet" data-action="this-week">Today</button></div><div class="calendar-view-switch" role="group" aria-label="Calendar layout"><button type="button" data-calendar-layout="month" aria-pressed="true">Month</button><button type="button" data-calendar-layout="week" aria-pressed="false">Week</button><button type="button" data-calendar-layout="agenda" aria-pressed="false">Agenda</button></div></div><p class="helper month-caption">Planned sessions and recorded activities share each date. Open either card for details; recorded work is never assumed to complete a plan.</p><div class="month-calendar" role="table" aria-label="${safe(monthName)} training calendar"><div class="month-head" role="row">${ORDER.map((day) => `<span role="columnheader">${DAYS[day]}</span>`).join('')}<span role="columnheader">Week summary</span></div>${rows}</div><div class="calendar-key" aria-label="Calendar key"><span><i class="key-planned"></i>Plan</span><span><i class="key-actual"></i>Recorded</span><span><i class="key-completed"></i>Marked complete</span></div>`;
+}
+async function loadSeason() {
+  const athlete = state.athleteId, request = ++state.seasonRequest, to = utcDay(new Date()), from = shiftUTC(to,-364);
+  state.season = { loading: true, from, to };
+  try {
+    const trends = await portal('athlete_trends', { athlete_id: athlete, from, to });
+    if (request !== state.seasonRequest || athlete !== state.athleteId) return;
+    state.season = { ...trends, from, to };
+  } catch (error) {
+    if (request !== state.seasonRequest || athlete !== state.athleteId) return;
+    state.season = { error: error.message, from, to };
+  }
+  if (state.athleteSection === 'season') renderAthlete();
+}
+function seasonMarkup() {
+  const result = state.season;
+  if (!result || result.loading) return '<h3>Season</h3><p role="status">Loading a year of recorded training and saved plans…</p>';
+  if (result.error) return `<div class="data-empty" role="alert"><h3>Season data is unavailable</h3><p>${safe(result.error)}</p><button type="button" class="secondary" data-season-refresh>Try again</button></div>`;
+  const plans = state.athlete?.plans || [], workouts = state.athlete?.workouts || [], activities = result.activities || [];
+  const weeks = []; const first = mondayOf(result.from), last = shiftUTC(currentWeek(),14);
+  for (let day=first; day<=last; day=shiftUTC(day,7)) {
+    const plan = plans.find((p) => p.week_start_date === day), rows = workouts.filter((w) => w.plan_id === plan?.id);
+    const actual = activities.filter((a) => { const date = activityCalendarDay(a); return date >= day && date <= calendarDate(day,0); });
+    const plannedMin = rows.reduce((n,w) => n+(Number(w.target_duration_min)||0),0), recordedMin = Math.round(actual.reduce((n,a) => n+(Number(a.duration_s)||0),0)/60);
+    weeks.push({day,plan,rows,actual,plannedMin,recordedMin});
+  }
+  const max = Math.max(60,...weeks.map((w) => Math.max(w.plannedMin,w.recordedMin))), recent = weeks.filter((w) => w.day <= currentWeek()).slice(-12);
+  const lastFour = recent.slice(-4), priorFour = recent.slice(-8,-4), sum = (rows,key) => rows.reduce((n,w) => n+w[key],0);
+  const goals = (state.athlete?.goals || []).filter((g) => g.target_date).sort((a,b) => a.target_date.localeCompare(b.target_date));
+  return `<div class="section-head"><div><h3>Season</h3><p class="helper">A year of recorded work beside saved weekly plans · ${safe(utcLabel(result.from))}–${safe(utcLabel(result.to))} UTC</p></div><button type="button" class="secondary" data-season-refresh>Refresh</button></div>${result.coverage_limited ? '<p class="data-warning">This range has more than 10,000 activities; totals may be incomplete.</p>' : ''}<div class="season-numbers"><div><span>Last 4 weeks</span><strong>${safe(trainingMinutesLabel(sum(lastFour,'recordedMin')))}</strong><small>Recorded time</small></div><div><span>Prior 4 weeks</span><strong>${safe(trainingMinutesLabel(sum(priorFour,'recordedMin')))}</strong><small>Recorded time</small></div><div><span>Next event</span><strong>${safe(goals.find((g) => g.target_date >= localDate())?.target_date ? utcLabel(goals.find((g) => g.target_date >= localDate()).target_date) : '—')}</strong><small>${safe(title(goals.find((g) => g.target_date >= localDate())?.event_type || 'No dated goal'))}</small></div></div><div class="season-chart" role="img" aria-label="Weekly planned and recorded training time over the past year"><div class="season-bars">${weeks.map((w) => `<div class="season-bar-group" title="${safe(utcLabel(w.day))}: planned ${safe(trainingMinutesLabel(w.plannedMin))}; recorded ${safe(trainingMinutesLabel(w.recordedMin))}"><div class="season-bar-pair"><i class="planned" style="height:${Math.round(w.plannedMin/max*100)}%"></i><i class="recorded" style="height:${Math.round(w.recordedMin/max*100)}%"></i></div>${w.day === currentWeek() || w.day.endsWith('-01') ? `<small>${safe(dateLabel(w.day))}</small>` : '<small aria-hidden="true">·</small>'}</div>`).join('')}</div></div><div class="calendar-key"><span><i class="key-planned"></i>Planned duration</span><span><i class="key-actual"></i>Recorded duration</span></div><h4>Recent and upcoming weeks</h4>${tableMarkup(['Week','Planned','Recorded','Activities','Plan'],weeks.slice(-18).reverse().map((w) => [safe(utcLabel(w.day)),safe(trainingMinutesLabel(w.plannedMin)),safe(trainingMinutesLabel(w.recordedMin)),String(w.actual.length),w.plan ? safe(title(w.plan.status || 'Saved')) : 'No saved plan']))}<h4>Dated goals</h4>${tableMarkup(['Date','Goal','Notes'],goals.map((g) => [safe(utcLabel(g.target_date)),safe(title(g.event_type || 'Training goal')),safe(g.notes || '—')]),'No dated goal is saved for this athlete.')}<p class="helper">These are recorded and planned hours, not a periodized target. The coach can currently publish the current or next week; longer-range period targets are not yet stored.</p>`;
+}
+const REUSE_BANDS = [['recovery',.30,.55],['endurance',.56,.75],['tempo',.76,.87],['sweet_spot',.88,.94],['threshold',.95,1.05],['vo2max',1.06,1.20],['anaerobic',1.21,1.50]];
+function reusableBlocks(workout) {
+  const ftp = Number(state.athlete?.zones?.ftp_watts), steps = workout.structured_steps;
+  if (!Array.isArray(steps) || !steps.length || steps.length > 30) return null;
+  const blocks = [];
+  for (const step of steps) {
+    const duration = Number(step.duration_s), type = step.type;
+    if (!Number.isInteger(duration) || duration < 60 || duration % 60 || duration > 10800 || !TYPES.some(([key]) => key === type)) return null;
+    let zone = 'open';
+    if (step.target_type === 'power') {
+      if (!(ftp > 0) || !Number.isFinite(Number(step.target_low)) || !Number.isFinite(Number(step.target_high))) return null;
+      const ratio = (Number(step.target_low) + Number(step.target_high)) / 2 / ftp;
+      const band = REUSE_BANDS.find(([,lo,hi]) => ratio >= lo && ratio <= hi);
+      if (!band) return null;
+      zone = band[0];
+    } else if (step.target_type !== 'open') return null;
+    blocks.push({ type, zone, duration_min: duration/60 });
+  }
+  return blocks;
+}
+function libraryMarkup() {
+  const plans = new Map((state.athlete?.plans || []).map((p) => [p.id,p.week_start_date]));
+  const query = state.libraryQuery.trim().toLowerCase();
+  const workouts = (state.athlete?.workouts || []).filter((w) => w.workout_type !== 'rest' && (w.headline || '').toLowerCase().includes(query))
+    .sort((a,b) => String(plans.get(b.plan_id)).localeCompare(String(plans.get(a.plan_id)))).slice(0,80);
+  return `<div class="section-head"><div><h3>Workouts</h3><p class="helper">Past prescriptions for this athlete. Open one to inspect its original targets, or use a supported session as a starting point for a new draft.</p></div><button type="button" class="primary" data-action="new-workout">Create workout</button></div><div class="library-search"><label for="library-query">Find a workout</label><input id="library-query" type="search" value="${safe(state.libraryQuery)}" placeholder="Search saved sessions"></div><div class="library-list">${workouts.length ? workouts.map((w) => { const date = plans.get(w.plan_id), blocks = reusableBlocks(w); return `<article class="library-item"><div><small>${safe(date ? utcLabel(date) : 'Saved session')} · ${safe(title(w.workout_type))}${w.prescription_source === 'human_coach' ? ' · Coach prescribed' : ''}</small><strong>${safe(w.headline || title(w.workout_type))}</strong><p>${safe(w.description || 'No athlete instructions saved.')}</p>${workoutChart(w)}</div><div class="library-item-actions"><span>${safe(minutesLabel(w.target_duration_min))}${w.target_tss == null ? '' : ' · ' + Math.round(Number(w.target_tss)) + ' TSS'}</span><button type="button" class="secondary" data-workout-preview="${safe(w.id)}">View</button>${blocks ? `<button type="button" class="secondary" data-reuse-workout="${safe(w.id)}">Use as draft</button>` : '<small>Original targets cannot be safely converted to today’s builder.</small>'}</div></article>`; }).join('') : `<div class="list-empty">${query ? 'No saved workout matches this search.' : 'No saved workouts for this athlete yet.'}</div>`}</div><p class="helper">Drafts convert supported power blocks to the athlete’s current FTP zones. Review every block before saving; old watt targets may reflect a different threshold. The builder currently saves to this week.</p>`;
+}
+function reuseWorkout(id) {
+  const source = state.athlete?.workouts.find((w) => w.id === id), blocks = source && reusableBlocks(source);
+  if (!source || !blocks) { setStatus('This workout cannot be converted to the current builder. Open it to inspect its original targets.', true); return; }
+  openBuilder();
+  state.builder = { ...state.builder, headline: source.headline || '', description: source.description || '', why_line: source.why_line || '', workout_type: source.workout_type || 'endurance', intent: source.intent || 'aerobic_base', blocks };
+  state.editorDirty = true;
+  renderBuilder();
+  $('#builder-error').textContent = 'Review every block against today’s FTP before saving. This draft is not yet on the calendar.';
 }
 function previewWorkout(id) {
   const workout = state.athlete?.workouts.find((w) => w.id === id); if (!workout) return;
@@ -882,18 +984,25 @@ $('#athlete-pane').addEventListener('click', (event) => {
   const section = event.target.closest('[data-athlete-section]');
   if (section) { state.athleteSection = section.dataset.athleteSection; renderAthlete(); $(`[data-athlete-section="${state.athleteSection}"]`).focus(); return; }
   const layout = event.target.closest('[data-calendar-layout]');
-  if (layout) { state.calendarLayout = layout.dataset.calendarLayout; renderAthlete(); $(`[data-calendar-layout="${state.calendarLayout}"]`).focus(); return; }
+  if (layout) { state.calendarLayout = layout.dataset.calendarLayout; if (state.calendarLayout === 'month') state.calendarMonth = state.calendarWeek.slice(0,7); renderAthlete(); $(`[data-calendar-layout="${state.calendarLayout}"]`).focus(); return; }
   const preview = event.target.closest('[data-workout-preview]');
   if (preview) { preview.focus(); previewWorkout(preview.dataset.workoutPreview); return; }
+  const reuse = event.target.closest('[data-reuse-workout]');
+  if (reuse) { reuseWorkout(reuse.dataset.reuseWorkout); return; }
   const shift = event.target.closest('[data-week-shift]');
   if (shift) { const weeks = calendarWeeks(); const next = weeks[weeks.indexOf(state.calendarWeek) + Number(shift.dataset.weekShift)]; if (next) { state.calendarWeek = next; renderAthlete(); const control = $(`[data-week-shift="${shift.dataset.weekShift}"]`); (control.disabled ? $('[data-action="this-week"]') : control).focus(); } return; }
+  const monthShift = event.target.closest('[data-month-shift]');
+  if (monthShift) { state.calendarMonth = shiftMonth(state.calendarMonth, Number(monthShift.dataset.monthShift)); renderAthlete(); $(`[data-month-shift="${monthShift.dataset.monthShift}"]`).focus(); return; }
+  if (event.target.closest('[data-season-refresh]')) { state.season = null; renderAthlete(); return; }
   if (event.target.closest('[data-calendar-retry]')) { delete state.calendarRecords[state.calendarWeek]; renderAthlete(); return; }
+  const retryWeek = event.target.closest('[data-calendar-retry-week]');
+  if (retryWeek) { delete state.calendarRecords[retryWeek.dataset.calendarRetryWeek]; renderAthlete(); return; }
   const addDay = event.target.closest('[data-add-calendar-day]');
-  if (addDay) { if (state.calendarWeek === currentWeek()) openBuilder('', Number(addDay.dataset.addCalendarDay)); else openWeek(state.calendarWeek); return; }
+  if (addDay) { const targetWeek = addDay.dataset.addWeek || state.calendarWeek; if (targetWeek === currentWeek()) openBuilder('', Number(addDay.dataset.addCalendarDay)); else openWeek(targetWeek); return; }
   const action = event.target.closest('[data-action]')?.dataset.action;
   if (action === 'back-to-roster') { state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); history.pushState(null, '', '#team'); $('#roster-query').focus(); scrollTo(0, 0); return; }
   if (action === 'new-workout') { if (state.calendarWeek === nextWeek()) openWeek(nextWeek()); else openBuilder(); }
-  if (action === 'this-week') { state.calendarWeek = currentWeek(); state.athleteSection = 'calendar'; renderAthlete(); $('[data-action="this-week"]').focus(); }
+  if (action === 'this-week') { state.calendarWeek = currentWeek(); state.calendarMonth = localDate().slice(0,7); state.athleteSection = 'calendar'; renderAthlete(); $('[data-action="this-week"]').focus(); }
   if (action === 'retry-athlete') selectAthlete(state.athleteId);
   if (action === 'connect-athlete') joinPanel();
   if (action === 'new-meeting') openMeeting();
@@ -905,6 +1014,13 @@ $('#athlete-pane').addEventListener('click', (event) => {
   if (noteId) { state.noteToArchive = noteId; $('#archive-note-dialog').showModal(); $('#keep-note').focus(); }
   const change = event.target.closest('[data-change]')?.dataset.change;
   if (change) { const [mi, ci] = change.split(':').map(Number); openBuilder(state.athlete.meetings[mi]?.proposed_changes[ci] || ''); }
+});
+$('#athlete-pane').addEventListener('input', (event) => {
+  if (event.target.id !== 'library-query') return;
+  state.libraryQuery = event.target.value;
+  const at = event.target.selectionStart;
+  $('.library-section').innerHTML = libraryMarkup();
+  const input = $('#library-query'); input.focus(); input.setSelectionRange(at,at);
 });
 $('#invite-coach').addEventListener('click', invitePanel);
 $('#join-team').addEventListener('click', joinPanel);
