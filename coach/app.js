@@ -303,7 +303,7 @@ function renderAthlete() {
     ['Fatigue', metrics?.atl == null ? '—' : Math.round(metrics.atl), 'Modeled ATL · 7-day load'],
     ['Form', metrics?.tsb == null ? '—' : Math.round(metrics.tsb), 'Modeled TSB · fitness − fatigue'],
     ['FTP', data.zones?.ftp_watts ? Math.round(data.zones.ftp_watts) + ' W' : '—', 'Cycling threshold'],
-    ['Energy', data.readiness?.checkin_energy != null ? data.readiness.checkin_energy + ' / 5' : '—', data.readiness?.metric_date ? 'Check-in · ' + dateLabel(data.readiness.metric_date) : 'No check-in yet'],
+    ['Energy', data.readiness?.checkin_energy != null ? data.readiness.checkin_energy + ' / 5' : '—', data.readiness?.checkin_energy != null ? 'Athlete report · ' + dateLabel(data.readiness.metric_date) : 'No energy report'],
   ];
   const meetingRows = data.meetings.length ? data.meetings.map((m, mi) => `<div class="meeting-row"><strong>${safe(dateLabel(m.happened_at))} · Coach call</strong><p>${safe(m.summary)}</p>${m.meeting_url ? '<small>Google Meet linked</small>' : ''}<div class="meeting-changes">${(m.proposed_changes || []).map((c, ci) => `<button type="button" data-change="${mi}:${ci}">Draft workout from: ${safe(c)}</button>`).join('')}</div></div>`).join('') : '<div class="list-empty"><strong>No coach calls yet</strong><p>Save call notes and agreed changes. You can also paste a transcript for help drafting minutes.</p><button type="button" class="secondary small-button" data-action="new-meeting">Add call notes</button></div>';
   const noteKinds = { observation: 'Training response', preference: 'Preference', goal: 'Goal', constraint: 'Constraint' };
