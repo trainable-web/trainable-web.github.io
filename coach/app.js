@@ -823,12 +823,16 @@ $('#roster-list').addEventListener('click', (event) => {
   const button = event.target.closest('[data-athlete]');
   if (button) { selectAthlete(button.dataset.athlete, { openDetail: true, pushRoute: true }); if (matchMedia('(max-width: 767.98px)').matches) scrollTo(0, 0); }
 });
-$('#roster-list').addEventListener('keydown', (event) => {
+$('#roster-list').addEventListener('keydown', async (event) => {
   if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key)) return;
   const items = [...$('#roster-list').querySelectorAll('[data-athlete]')];
   const index = items.indexOf(document.activeElement);
   if (index < 0) return;
-  if (event.key === 'Enter') { event.preventDefault(); $('#athlete-pane').focus(); return; }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    await selectAthlete(items[index].dataset.athlete, { openDetail: true, pushRoute: true });
+    $('#athlete-pane').focus(); return;
+  }
   event.preventDefault(); items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
 });
 addEventListener('popstate', () => {
