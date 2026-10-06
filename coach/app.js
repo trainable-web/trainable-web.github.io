@@ -11,7 +11,7 @@ const TYPES = [['warmup', 'Warm-up'], ['work', 'Work'], ['recovery', 'Recovery']
 const state = { roster: [], athleteId: null, athlete: null, builder: null, meeting: null, weekDraft: null, weekSelection: null,
   sharedWith: [], trigger: null, editorDirty: false, noteToArchive: null, weekReset: null, resetTrigger: null,
   weekGenerating: false, weekPublishing: false, weekResetting: false, noteSaving: false, mobileDetailOpen: false, athleteRequest: 0,
-  calendarWeek: null, calendarDay: null, calendarLayout: 'week', athleteSection: 'analysis', attention: null, attentionFilter: 'open', devices: null,
+  calendarWeek: null, calendarDay: null, calendarLayout: innerWidth < 768 ? 'agenda' : 'week', calendarRecords: {}, athleteSection: 'analysis', attention: null, attentionFilter: 'open', devices: null,
   wearableWorkouts: [], removeGarminTrigger: null, intervals: null, removeIntervalsTrigger: null };
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
@@ -279,6 +279,7 @@ async function selectAthlete(id, options = {}) {
     state.mobileDetailOpen = options.openDetail;
     $('#workspace').classList.toggle('mobile-detail-open', state.mobileDetailOpen);
   }
+  state.calendarRecords = {};
   state.athleteId = id; state.athlete = null; state.wearableWorkouts = []; renderRoster(); $('#athlete-pane').innerHTML = `<div class="calendar-loading" role="status"><p>Loading athlete records…</p><div class="loading-week" aria-hidden="true">${ORDER.map((day) => `<div>${DAYS[day]}</div>`).join('')}</div></div>`;
   try {
     const [athlete, imported] = await Promise.all([portal('read_athlete', { athlete_id: id }),
@@ -319,13 +320,40 @@ function renderAthlete() {
     <section ${section !== 'tools' ? 'hidden' : ''}><h3>Coaching tools</h3><p class="helper">Choose the task you need. AI suggestions are always reviewed before saving.</p><div class="coaching-tools">${[['new-workout','Create workout','Set the title, instructions and training blocks yourself.'],['ai-workout','Draft workout with AI','Describe a session, then review and edit the proposed blocks.'],['build-week','Build or edit a week','Plan this week or next week and review before publishing.'],['review-week','Review this week with AI','Ask for one session adjustment using the athlete’s current context.'],['new-note','Add athlete note','Record training response, goals, preferences or constraints.'],['new-meeting','Log coach call','Save call notes and agreed changes; transcript assistance is optional.']].map(([action,label,description]) => `<button type="button" class="secondary" data-action="${action}"><strong>${label}</strong><span>${description}</span></button>`).join('')}</div></section>
     <div class="context-column" ${section !== 'notes' ? 'hidden' : ''}><section class="profile-notes"><div class="section-head"><h3>Athlete notes</h3><button type="button" class="secondary" data-action="new-note">Add note</button></div><div class="meeting-list">${noteRows}</div></section><section class="calls-section"><div class="section-head"><h3>Coach calls</h3><button type="button" class="secondary" data-action="new-meeting">Add call notes</button></div><div class="meeting-list">${meetingRows}</div></section></div>`;
   if (section === 'analysis') paintAnalysis();
+  if (section === 'calendar' && !state.calendarRecords[week]) loadCalendarActivities(week);
 }
 function calendarDate(week, day) {
   const date = new Date(week + 'T12:00:00'); date.setDate(date.getDate() + (day + 6) % 7);
   return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
 }
 function calendarWeeks() {
-  return [...new Set([currentWeek(), nextWeek(), ...(state.athlete?.plans || []).map((p) => p.week_start_date)])].filter((w) => w <= nextWeek()).sort();
+  const oldestPlan = (state.athlete?.plans || []).map((p) => p.week_start_date).sort()[0];
+  const start = oldestPlan && oldestPlan < shiftUTC(currentWeek(), -364) ? oldestPlan : shiftUTC(currentWeek(), -364);
+  const weeks = []; for (let day = start; day <= nextWeek(); day = shiftUTC(day, 7)) weeks.push(day);
+  return weeks;
+}
+function calendarLocalDay(value) {
+  const d = new Date(value);
+  return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-');
+}
+function activityCalendarDay(activity) { return activity.strava_local_date || calendarLocalDay(activity.start_date); }
+async function loadCalendarActivities(week) {
+  const athlete = state.athleteId;
+  state.calendarRecords[week] = { loading: true, activities: [] };
+  try {
+    const activities = [];
+    for (let page = 0; page < 10; page++) {
+      const result = await portal('activity_history', { athlete_id: athlete, from: shiftUTC(week, -1), to: shiftUTC(week, 7), page });
+      activities.push(...result.activities);
+      if (activities.length >= result.total) break;
+    }
+    if (athlete !== state.athleteId) return;
+    state.calendarRecords[week] = { activities: activities.filter((a) => activityCalendarDay(a) >= week && activityCalendarDay(a) <= calendarDate(week, 0)), limited: activities.length >= 500 };
+  } catch (error) {
+    if (athlete !== state.athleteId) return;
+    state.calendarRecords[week] = { activities: [], error: error.message };
+  }
+  if (state.athleteSection === 'calendar' && state.calendarWeek === week) renderAthlete();
 }
 function workoutStatus(workout, date) {
   if (workout.completed) return ['completed', 'Completed'];
@@ -345,22 +373,24 @@ function workoutChart(workout) {
 function renderCalendar(week, workouts) {
   const today = localDate(); const weeks = calendarWeeks(); const index = weeks.indexOf(week);
   const end = calendarDate(week, 0); const editable = week >= currentWeek();
+  const record = state.calendarRecords[week], activities = record?.activities || [];
+  const recordedSeconds = activities.reduce((n, a) => n + Number(a.duration_s || 0), 0);
   const planned = workouts.reduce((n, w) => n + (Number(w.target_duration_min) || 0), 0);
   const sessions = workouts.filter((w) => w.workout_type !== 'rest');
   const complete = sessions.filter((w) => w.completed).length;
   const tssValues = sessions.map((w) => w.target_tss ?? w.computed_tss).filter((v) => v != null && Number.isFinite(Number(v)));
   const tss = tssValues.reduce((n, v) => n + Number(v), 0);
   const days = ORDER.map((day) => {
-    const date = calendarDate(week, day); const items = workouts.filter((w) => w.day_of_week === day);
+    const date = calendarDate(week, day); const items = workouts.filter((w) => w.day_of_week === day); const actual = activities.filter((a) => activityCalendarDay(a) === date);
     const canAdd = editable && date >= today && !items.length;
     return `<div class="calendar-cell ${date === today ? 'is-today' : ''}"><div class="calendar-cell-heading"><span>${DAYS[day]}</span><strong>${Number(date.slice(-2))}</strong>${date === today ? '<small>Today</small>' : ''}</div><div class="calendar-cell-sessions">${items.map((w) => {
       const [status, label] = workoutStatus(w, date); const load = w.target_tss ?? w.computed_tss;
       return `<button type="button" class="workout-card ${status}" data-workout-preview="${safe(w.id)}"><span class="workout-card-kind">${safe(title(w.workout_type || 'Workout'))}</span><strong class="workout-card-title">${safe(w.headline || title(w.workout_type))}</strong><span class="workout-card-time">${safe(minutesLabel(w.target_duration_min))}</span>${load != null ? `<small>${Math.round(Number(load))} TSS</small>` : ''}${workoutChart(w)}<span class="workout-card-status">${w.completed ? '✓ ' : ''}${label}</span>${w.prescription_source === 'human_coach' ? '<small class="workout-card-source">Coach prescribed</small>' : ''}</button>`;
-    }).join('') || `<p class="calendar-empty">${date < today ? 'No planned session' : 'No workout planned'}</p>`}</div>${canAdd ? `<button type="button" class="calendar-add" data-add-calendar-day="${day}" aria-label="Add workout for ${DAYS[day]}, ${safe(dateLabel(date))}">+ Add</button>` : ''}</div>`;
+    }).join('')}${actual.map((a) => `<button type="button" class="calendar-activity" data-activity="${safe(a.id)}"><span class="calendar-activity-kind">Recorded · ${safe(title(a.strava_sport_type || a.sport_type))}</span><strong>${safe(a.name || title(a.strava_sport_type || a.sport_type) + ' activity')}</strong><span>${safe(elapsedLabel(a.duration_s))}${a.distance_m != null ? ' · ' + safe(numberLabel(a.distance_m / 1000, ' km', 1)) : ''}</span><small>${a.avg_power != null ? safe(numberLabel(a.avg_power, ' W')) : ''}${a.avg_power != null && a.avg_hr != null ? ' · ' : ''}${a.avg_hr != null ? safe(numberLabel(a.avg_hr, ' bpm')) : ''}</small></button>`).join('')}${!items.length && !actual.length ? `<p class="calendar-empty">${record?.loading ? 'Loading activities…' : date < today ? 'No session recorded' : 'No workout planned'}</p>` : ''}</div>${canAdd ? `<button type="button" class="calendar-add" data-add-calendar-day="${day}" aria-label="Add workout for ${DAYS[day]}, ${safe(dateLabel(date))}">+ Add</button>` : ''}</div>`;
   }).join('');
-  return `<div class="calendar-toolbar"><div class="calendar-controls"><button type="button" class="secondary" data-week-shift="-1" aria-label="Previous available week" ${index <= 0 ? 'disabled' : ''}>‹<span class="control-tooltip" role="tooltip">Previous available week</span></button><h3>${safe(dateLabel(week))} – ${safe(dateLabel(end))}<small>${week === currentWeek() ? 'This week' : week === nextWeek() ? 'Next week' : 'Saved week · Read only'}</small></h3><button type="button" class="secondary" data-week-shift="1" aria-label="Next available week" ${index >= weeks.length - 1 ? 'disabled' : ''}>›<span class="control-tooltip" role="tooltip">Next available week</span></button><button type="button" class="quiet" data-action="this-week">Today</button></div><div class="calendar-view-switch" role="group" aria-label="Calendar layout"><button type="button" data-calendar-layout="week" aria-pressed="${state.calendarLayout === 'week'}">Week</button><button type="button" data-calendar-layout="agenda" aria-pressed="${state.calendarLayout === 'agenda'}">Agenda</button></div></div>
-    ${state.calendarLayout === 'week' ? '<p class="calendar-scroll-hint">Scroll across the week, or choose Agenda for a list.</p>' : ''}<div class="calendar-body"><div class="calendar-grid planner-grid ${state.calendarLayout === 'agenda' ? 'agenda' : ''}" role="group" tabindex="0" aria-label="Training week of ${safe(dateLabel(week))}">${days}</div><aside class="calendar-summary" aria-label="Week summary"><h4>Week summary</h4><div class="summary-duration"><strong>${safe(trainingMinutesLabel(planned))}</strong><span>planned time</span></div><dl><div><dt>Planned TSS</dt><dd>${tssValues.length ? Math.round(tss) : '—'}</dd></div><div><dt>Sessions</dt><dd>${sessions.length}</dd></div><div><dt>Completed</dt><dd>${complete} / ${sessions.length}</dd></div><div><dt>Unplanned days</dt><dd>${7 - new Set(workouts.map((w) => w.day_of_week)).size}</dd></div></dl><progress max="${Math.max(sessions.length, 1)}" value="${complete}" aria-label="${complete} of ${sessions.length} sessions marked complete"></progress><p class="summary-caption">${tssValues.length < sessions.length ? 'Some sessions have no TSS estimate. ' : ''}Completion reflects the athlete’s saved plan.</p>${week === currentWeek() ? '<button type="button" class="secondary full" data-action="review-week">Suggest a change</button><p class="summary-caption">The assistant suggests one session change for your review.</p>' : editable ? '<p class="summary-caption">Use Plan week to draft and review next week before publishing.</p>' : '<p class="summary-caption">Only saved weeks are available here.</p>'}</aside></div>
-    <div class="calendar-key" aria-label="Workout status key"><span><i class="key-planned"></i>Planned</span><span><i class="key-completed"></i>Completed</span><span><i class="key-unconfirmed"></i>Not marked complete</span><span>Open a workout for instructions and session blocks.</span></div>`;
+  return `<div class="calendar-toolbar"><div class="calendar-controls"><button type="button" class="secondary" data-week-shift="-1" aria-label="Previous available week" ${index <= 0 ? 'disabled' : ''}>‹<span class="control-tooltip" role="tooltip">Previous available week</span></button><h3>${safe(dateLabel(week))} – ${safe(dateLabel(end))}<small>${week === currentWeek() ? 'This week' : week === nextWeek() ? 'Next week' : 'Earlier week'}</small></h3><button type="button" class="secondary" data-week-shift="1" aria-label="Next available week" ${index >= weeks.length - 1 ? 'disabled' : ''}>›<span class="control-tooltip" role="tooltip">Next available week</span></button><button type="button" class="quiet" data-action="this-week">Today</button><button type="button" class="quiet" data-calendar-retry>Refresh activities</button></div><div class="calendar-view-switch" role="group" aria-label="Calendar layout"><button type="button" data-calendar-layout="week" aria-pressed="${state.calendarLayout === 'week'}">Week</button><button type="button" data-calendar-layout="agenda" aria-pressed="${state.calendarLayout === 'agenda'}">Agenda</button></div></div>
+    ${state.calendarLayout === 'week' ? '<p class="calendar-scroll-hint">Scroll across the week, or choose Agenda for a list.</p>' : ''}${record?.error ? `<p class="data-warning" role="alert">Activities could not load: ${safe(record.error)} <button type="button" data-calendar-retry>Try again</button></p>` : ''}${record?.limited ? '<p class="data-warning">This week has more than 500 records. Some activities may be missing.</p>' : ''}<div class="calendar-body"><div class="calendar-grid planner-grid ${state.calendarLayout === 'agenda' ? 'agenda' : ''}" role="group" tabindex="0" aria-label="Training week of ${safe(dateLabel(week))}">${days}</div><aside class="calendar-summary" aria-label="Week summary"><h4>Week summary</h4><div class="summary-duration"><strong>${safe(trainingMinutesLabel(planned))}</strong><span>planned time</span></div><dl><div><dt>Recorded</dt><dd>${record?.loading ? 'Loading…' : safe(trainingMinutesLabel(Math.round(recordedSeconds / 60)))}</dd></div><div><dt>Activities</dt><dd>${record?.loading ? '—' : activities.length}</dd></div><div><dt>Planned TSS</dt><dd>${tssValues.length ? Math.round(tss) : '—'}</dd></div><div><dt>Planned sessions</dt><dd>${sessions.length}</dd></div><div><dt>Marked complete</dt><dd>${complete} / ${sessions.length}</dd></div></dl><progress max="${Math.max(sessions.length, 1)}" value="${complete}" aria-label="${complete} of ${sessions.length} sessions marked complete"></progress><p class="summary-caption">Recorded activities are independent of completion marks. Strava sessions use the activity’s local date when available; older records use your timezone.</p>${week === currentWeek() ? '<button type="button" class="secondary full" data-action="review-week">Suggest a change</button><p class="summary-caption">The assistant suggests one session change for your review.</p>' : editable ? '<p class="summary-caption">Use Plan week to draft and review next week before publishing.</p>' : '<p class="summary-caption">Browse prior weeks for recorded activities.</p>'}</aside></div>
+    <div class="calendar-key" aria-label="Workout status key"><span><i class="key-planned"></i>Planned</span><span><i class="key-completed"></i>Marked complete</span><span><i class="key-actual"></i>Recorded activity</span><span>Open an activity for charts and laps.</span></div>`;
 }
 function previewWorkout(id) {
   const workout = state.athlete?.workouts.find((w) => w.id === id); if (!workout) return;
@@ -857,6 +887,7 @@ $('#athlete-pane').addEventListener('click', (event) => {
   if (preview) { preview.focus(); previewWorkout(preview.dataset.workoutPreview); return; }
   const shift = event.target.closest('[data-week-shift]');
   if (shift) { const weeks = calendarWeeks(); const next = weeks[weeks.indexOf(state.calendarWeek) + Number(shift.dataset.weekShift)]; if (next) { state.calendarWeek = next; renderAthlete(); const control = $(`[data-week-shift="${shift.dataset.weekShift}"]`); (control.disabled ? $('[data-action="this-week"]') : control).focus(); } return; }
+  if (event.target.closest('[data-calendar-retry]')) { delete state.calendarRecords[state.calendarWeek]; renderAthlete(); return; }
   const addDay = event.target.closest('[data-add-calendar-day]');
   if (addDay) { if (state.calendarWeek === currentWeek()) openBuilder('', Number(addDay.dataset.addCalendarDay)); else openWeek(state.calendarWeek); return; }
   const action = event.target.closest('[data-action]')?.dataset.action;
