@@ -212,6 +212,14 @@
 .trace-track h4 { font-size: 14px; margin: 12px 0 5px; }
 .trace-track h4 small { color: var(--muted); font-weight: 400; }
 .trace-track .chart-legend { display: none; }
+.trace-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: -4px 0 8px; }
+.trace-tools label { margin: 0; font-weight: 700; }
+.trace-tools select { width: auto; min-width: 126px; min-height: 40px; }
+.trace-tools .helper { margin: 0; }
+.trace-selection-preview { display: block; min-height: 20px; margin: 0 0 4px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.trace-track svg { cursor: crosshair; touch-action: pan-y; }
+.trace-brush-overlay rect { fill: #276c91; fill-opacity: .16; stroke: none; }
+.trace-brush-overlay line { stroke: #154f70; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .trace-inspector { border: 1px solid var(--line); background: #f7f9f5; padding: 12px 14px; margin-top: 12px; }
 .trace-inspector label { margin-bottom: 8px; }
 .trace-inspector output { display: flex !important; flex-wrap: wrap; gap: 8px 18px; align-items: baseline; margin-bottom: 8px; }
