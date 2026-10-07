@@ -11,7 +11,7 @@ const TYPES = [['warmup', 'Warm-up'], ['work', 'Work'], ['recovery', 'Recovery']
 const state = { roster: [], athleteId: null, athlete: null, builder: null, meeting: null, weekDraft: null, weekSelection: null,
   sharedWith: [], trigger: null, editorDirty: false, noteToArchive: null, weekReset: null, resetTrigger: null,
   weekGenerating: false, weekPublishing: false, weekResetting: false, noteSaving: false, mobileDetailOpen: false, athleteRequest: 0,
-  calendarWeek: null, calendarMonth: null, calendarDay: null, calendarLayout: innerWidth < 768 ? 'agenda' : 'month', calendarRecords: {}, athleteSection: 'calendar', attention: null, attentionFilter: 'open', devices: null,
+  calendarWeek: null, calendarMonth: null, calendarDay: null, calendarLayout: innerWidth < 768 ? 'agenda' : 'week', calendarRecords: {}, athleteSection: 'calendar', attention: null, attentionFilter: 'open', devices: null,
   wearableWorkouts: [], removeGarminTrigger: null, intervals: null, removeIntervalsTrigger: null, season: null, seasonRequest: 0, libraryQuery: '' };
 const $ = (selector) => document.querySelector(selector);
 const safe = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
@@ -247,7 +247,7 @@ function renderAttention() {
   const review = open.filter((item) => item.priority === 'review');
   const planning = open.filter((item) => item.priority === 'planning');
   const gaps = open.filter((item) => item.priority === 'data');
-  $('#attention-summary').innerHTML = `<div><strong>${data.athlete_count}</strong><span>${data.athlete_count === 1 ? 'athlete' : 'athletes'} accessible</span></div><div><strong>${review.length}</strong><span>check-ins to review</span></div><div><strong>${planning.length}</strong><span>plans to prepare</span></div><div><strong>${gaps.length}</strong><span>data gaps</span></div>`;
+  $('#attention-summary').innerHTML = `<div><strong>${data.athlete_count}</strong><span>${data.athlete_count === 1 ? 'athlete' : 'athletes'} accessible</span></div><div><strong>${review.length}</strong><span>rides and check-ins to review</span></div><div><strong>${planning.length}</strong><span>plans to prepare</span></div><div><strong>${gaps.length}</strong><span>data gaps</span></div>`;
   $('#attention-coverage').hidden = !data.activity_coverage_limited;
   $('#attention-coverage').textContent = data.activity_coverage_limited ? 'Activity volume exceeded this quick review. Data-gap alerts were suppressed; open an athlete for a closer look.' : '';
   const filter = state.attentionFilter;
@@ -259,7 +259,7 @@ function renderAttention() {
     $('#attention-list').innerHTML = `<div class="attention-empty"><strong>${headline}</strong><p>${detail}</p><button type="button" class="secondary" data-attention-athletes>Review athletes</button></div>`;
     return;
   }
-  $('#attention-list').innerHTML = shown.map((item) => `<article class="attention-item ${item.reviewed_at ? 'is-reviewed' : ''}"><div class="attention-item-main"><div class="attention-item-top"><span class="attention-type ${safe(item.priority)}">${safe(item.priority === 'review' ? 'Check-in' : item.priority === 'planning' ? 'Planning' : 'Data gap')}</span><span class="attention-date">${safe(dateLabel(item.observed_at))}</span></div><h3>${safe(item.athlete_name)} · ${safe(item.headline)}</h3><p>${safe(item.explanation)}</p><details><summary>View evidence</summary><ul>${item.evidence.map((line) => `<li>${safe(line)}</li>`).join('')}</ul><small>${item.evidence_kind === 'athlete_reported' ? 'Athlete-reported' : 'Observed'} · ${item.data_quality === 'limited' ? 'Limited data' : 'Direct evidence'}</small></details></div><div class="attention-actions"><button type="button" class="primary small-button" data-attention-athlete="${safe(item.athlete_id)}" data-attention-plan="${item.priority === 'planning'}">${safe(item.next_action)}</button>${item.reviewed_at ? '<span class="attention-reviewed">Reviewed</span>' : `<button type="button" class="quiet small-button" data-attention-review="${safe(item.id)}">Mark reviewed</button>`}</div></article>`).join('');
+  $('#attention-list').innerHTML = shown.map((item) => `<article class="attention-item ${item.reviewed_at ? 'is-reviewed' : ''}"><div class="attention-item-main"><div class="attention-item-top"><span class="attention-type ${safe(item.priority)}">${safe(item.category === 'ride' ? 'Ride review' : item.priority === 'review' ? 'Check-in' : item.priority === 'planning' ? 'Planning' : 'Data gap')}</span><span class="attention-date">${safe(dateLabel(item.observed_at))}</span></div><h3>${safe(item.athlete_name)} · ${safe(item.headline)}</h3>${item.ride_review?.summary ? `<p><strong>${safe(item.ride_review.summary)}</strong></p>` : ''}<p>${safe(item.explanation)}</p>${item.ride_review?.recommendation === 'new_workout' ? '<p class="ride-review-recommendation">Possible plan change · coach approval required</p>' : item.ride_review ? '<p class="ride-review-recommendation">The saved plan stays in place unless you change it.</p>' : ''}<details><summary>View evidence</summary><ul>${item.evidence.map((line) => `<li>${safe(line)}</li>`).join('')}</ul><small>${item.evidence_kind === 'athlete_reported' ? 'Athlete-reported' : 'Observed'} · ${item.data_quality === 'limited' ? 'Limited data' : 'Direct evidence'}</small></details></div><div class="attention-actions"><button type="button" class="primary small-button" data-attention-athlete="${safe(item.athlete_id)}" data-attention-plan="${item.priority === 'planning'}" ${item.ride_review ? `data-attention-ride="${safe(item.ride_review.activity_id)}"` : ''}>${safe(item.next_action)}</button>${item.ride_review && !item.reviewed_at ? `${item.ride_review.template_id ? `<button type="button" class="secondary small-button" data-attention-template="${safe(item.id)}">Review proposed workout</button>` : ''}<button type="button" class="secondary small-button" data-attention-ask="${safe(item.id)}">Ask for new workout</button>` : ''}${item.reviewed_at ? '<span class="attention-reviewed">Reviewed</span>' : `<button type="button" class="quiet small-button" data-attention-review="${safe(item.id)}">${item.ride_review ? 'Keep plan · done' : 'Mark reviewed'}</button>`}</div></article>`).join('');
 }
 function renderRoster() {
   const query = $('#roster-query').value.trim().toLocaleLowerCase();
@@ -274,7 +274,7 @@ function renderRoster() {
 async function selectAthlete(id, options = {}) {
   if (!id) { $('#athlete-pane').innerHTML = '<div class="list-empty"><h2>Connect your first athlete</h2><p>Use an invite code from the athlete to open their training calendar.</p><button type="button" class="primary" data-action="connect-athlete">Connect an athlete</button></div>'; return; }
   const request = ++state.athleteRequest;
-  if (id !== state.athleteId) { state.calendarWeek = currentWeek(); state.calendarMonth = localDate().slice(0,7); state.calendarDay = null; state.athleteSection = 'calendar'; }
+  if (id !== state.athleteId || options.openDetail) { state.calendarWeek = currentWeek(); state.calendarMonth = localDate().slice(0,7); state.calendarDay = null; state.athleteSection = 'calendar'; }
   if (options.openDetail != null) {
     state.mobileDetailOpen = options.openDetail;
     $('#workspace').classList.toggle('mobile-detail-open', state.mobileDetailOpen);
@@ -312,7 +312,7 @@ function renderAthlete() {
   $('#athlete-pane').innerHTML = `
     <button type="button" class="mobile-back quiet" data-action="back-to-roster">← All athletes</button>
     <header class="athlete-top"><div class="athlete-identity"><h2>${safe(name)}</h2><p>${safe(title(p.primary_sport || 'Training'))}${isSelf ? ' · Your training' : ' · Athlete'}</p></div><div class="metrics" aria-label="Athlete training measures">${cells.map((c) => `<div class="metric"><span>${safe(c[0])}</span><strong>${safe(c[1])}</strong><small>${safe(c[2])}</small></div>`).join('')}</div><div class="athlete-actions">${week >= currentWeek() ? `<button type="button" class="primary" data-action="new-workout">Add workout</button><button type="button" class="secondary" data-action="build-week">Plan week</button>` : '<button type="button" class="secondary" data-action="this-week">Go to this week</button>'}</div></header>
-    
+
     <details class="load-disclosure"><summary>Training load · ${metrics?.metric_date ? safe(dateLabel(metrics.metric_date)) : 'No record'}</summary><p class="load-timestamp">${metrics?.metric_date ? 'Training load last recorded: ' + safe(utcLabel(metrics.metric_date)) : 'No training-load record available.'} Modeled load may include estimates; review the data behind it before planning.</p></details><div class="athlete-section-nav" role="group" aria-label="Athlete view">${[['calendar','Calendar'],['analysis','Dashboard'],['season','Season'],['library','Workout library'],['profile','Profile & zones'],['notes','Notes & calls'],['tools','Tools']].map(([value,label]) => `<button type="button" data-athlete-section="${value}" aria-pressed="${section === value}">${label}</button>`).join('')}</div>
     <section class="week-section" ${section !== 'calendar' ? 'hidden' : ''}>${state.calendarLayout === 'month' ? renderMonthCalendar(week) : renderCalendar(week, workouts)}</section>
     <section class="analysis-section" ${section !== 'analysis' ? 'hidden' : ''}>${section === 'analysis' ? analysisMarkup() : ''}</section>
@@ -326,6 +326,52 @@ function renderAthlete() {
   if (section === 'calendar') {
     const needed = state.calendarLayout === 'month' ? monthWeeks(state.calendarMonth) : [week];
     needed.filter((item) => !state.calendarRecords[item]).forEach(loadCalendarActivities);
+  }
+}
+async function saveAthleteSettings() {
+  const form = $('#athlete-settings-form');
+  if (!form || !state.athleteId || !form.reportValidity()) return;
+  const value = (name) => form.elements.namedItem(name)?.value?.trim() ?? '';
+  const checked = (name) => Boolean(form.elements.namedItem(name)?.checked);
+  const optional = (name) => value(name) === '' ? null : Number(value(name));
+  const profile = {
+    display_name: value('display_name'), primary_sport: value('primary_sport'),
+    experience_level: value('experience_level'), birth_year: optional('birth_year'), sex: value('sex'),
+    weight_kg: optional('weight_kg'), height_cm: optional('height_cm'), gym_access: checked('gym_access'),
+    available_equipment: value('available_equipment').split(',').map((item) => item.trim()).filter(Boolean),
+    day_availability_min: DAYS.map((_, day) => optional(`availability_${day}`)),
+    preferred_rest_days: DAYS.map((_, day) => day).filter((day) => checked(`rest_${day}`)),
+    training_aggressiveness: value('training_aggressiveness'), injury_notes: value('injury_notes'),
+    environment_notes: value('environment_notes'),
+  };
+  const zones = {
+    ftp_watts: optional('ftp_watts'), threshold_hr: optional('threshold_hr'), max_hr: optional('max_hr'),
+    resting_hr: optional('resting_hr'), threshold_pace_sec_per_km: optional('threshold_pace_sec_per_km'),
+    power_zone_percentages: ['recovery','endurance','tempo','sweet_spot','threshold','vo2max','anaerobic','neuromuscular']
+      .map((key) => ({ key, low_pct: Number(value(`power_zone_${key}_low`)), high_pct: Number(value(`power_zone_${key}_high`)) })),
+    ftp_locked: checked('ftp_locked'),
+  };
+  const training_context = {
+    block_start_date: value('block_start_date') || null, block_end_date: value('block_end_date') || null,
+    block_length_weeks: optional('block_length_weeks'), recovery_week_start_date: value('recovery_week_start_date') || null,
+    target_weekly_hours: optional('target_weekly_hours'), training_days_per_week: optional('training_days_per_week'),
+    training_cycle_days: optional('training_cycle_days'), block_focus: value('block_focus'),
+    repeat_workouts_ok: checked('repeat_workouts_ok'),
+  };
+  const button = form.querySelector('[data-action="save-athlete-settings"]');
+  button.disabled = true;
+  setStatus('Saving athlete settings…', false, '#athlete-settings-status');
+  try {
+    const { settings } = await portal('save_athlete_settings', { athlete_id: state.athleteId, profile, zones, training_context });
+    state.athlete.profile = settings.profile;
+    state.athlete.zones = settings.zones;
+    state.athlete.training_context = settings.training_context;
+    renderAthlete();
+    setStatus('Athlete settings saved. Future workout targets use these values.', false, '#athlete-settings-status');
+    $('[data-action="save-athlete-settings"]')?.focus();
+  } catch (error) {
+    button.disabled = false;
+    setStatus(error.message, true, '#athlete-settings-status');
   }
 }
 function calendarDate(week, day) {
@@ -483,7 +529,21 @@ function libraryMarkup() {
   const query = state.libraryQuery.trim().toLowerCase();
   const workouts = (state.athlete?.workouts || []).filter((w) => w.workout_type !== 'rest' && (w.headline || '').toLowerCase().includes(query))
     .sort((a,b) => String(plans.get(b.plan_id)).localeCompare(String(plans.get(a.plan_id)))).slice(0,80);
-  return `<div class="section-head"><div><h3>Workouts</h3><p class="helper">Past prescriptions for this athlete. Open one to inspect its original targets, or use a supported session as a starting point for a new draft.</p></div><button type="button" class="primary" data-action="new-workout">Create workout</button></div><div class="library-search"><label for="library-query">Find a workout</label><input id="library-query" type="search" value="${safe(state.libraryQuery)}" placeholder="Search saved sessions"></div><div class="library-list">${workouts.length ? workouts.map((w) => { const date = plans.get(w.plan_id), blocks = reusableBlocks(w); return `<article class="library-item"><div><small>${safe(date ? utcLabel(date) : 'Saved session')} · ${safe(title(w.workout_type))}${w.prescription_source === 'human_coach' ? ' · Coach prescribed' : ''}</small><strong>${safe(w.headline || title(w.workout_type))}</strong><p>${safe(w.description || 'No athlete instructions saved.')}</p>${workoutChart(w)}</div><div class="library-item-actions"><span>${safe(minutesLabel(w.target_duration_min))}${w.target_tss == null ? '' : ' · ' + Math.round(Number(w.target_tss)) + ' TSS'}</span><button type="button" class="secondary" data-workout-preview="${safe(w.id)}">View</button>${blocks ? `<button type="button" class="secondary" data-reuse-workout="${safe(w.id)}">Use as draft</button>` : '<small>Original targets cannot be safely converted to today’s builder.</small>'}</div></article>`; }).join('') : `<div class="list-empty">${query ? 'No saved workout matches this search.' : 'No saved workouts for this athlete yet.'}</div>`}</div><p class="helper">Drafts convert supported power blocks to the athlete’s current FTP zones. Review every block before saving; old watt targets may reflect a different threshold. The builder currently saves to this week.</p>`;
+  const templates = (state.athlete?.workout_library || []).filter((w) => `${w.category} ${w.headline} ${w.intent} ${w.description}`.toLowerCase().includes(query));
+  const categories = [...new Set(templates.map((w) => w.category))];
+  const catalog = categories.map((category) => `<div class="library-category"><h4>${safe(category)}</h4><div class="library-list">${templates.filter((w) => w.category === category).map((w) => `<article class="library-item library-template"><div><small>${safe(title(w.intent))}</small><strong>${safe(w.headline)}</strong><p>${safe(w.description)}</p><small>${safe(w.blocks.map((b) => `${b.duration_min}m ${title(b.zone)}`).join(' · '))}</small></div><div class="library-item-actions"><span>${safe(minutesLabel(w.blocks.reduce((n,b) => n + b.duration_min, 0)))}</span><button type="button" class="secondary" data-template-workout="${safe(w.id)}">Use as draft</button></div></article>`).join('')}</div></div>`).join('');
+  return `<div class="section-head"><div><h3>Workout library</h3><p class="helper">Ready-to-edit sessions for aerobic base, FTP, VO₂ max, recovery, race preparation and more. Targets use the athlete’s current FTP.</p></div><button type="button" class="primary" data-action="new-workout">Create workout</button></div><div class="library-search"><label for="library-query">Find a workout</label><input id="library-query" type="search" value="${safe(state.libraryQuery)}" placeholder="Search all workouts"></div><h3>Training templates · ${templates.length}</h3>${catalog || '<div class="list-empty">No template matches this search.</div>'}<h3>Saved athlete sessions</h3><div class="library-list">${workouts.length ? workouts.map((w) => { const date = plans.get(w.plan_id), blocks = reusableBlocks(w); return `<article class="library-item"><div><small>${safe(date ? utcLabel(date) : 'Saved session')} · ${safe(title(w.workout_type))}${w.prescription_source === 'human_coach' ? ' · Coach prescribed' : ''}</small><strong>${safe(w.headline || title(w.workout_type))}</strong><p>${safe(w.description || 'No athlete instructions saved.')}</p>${workoutChart(w)}</div><div class="library-item-actions"><span>${safe(minutesLabel(w.target_duration_min))}${w.target_tss == null ? '' : ' · ' + Math.round(Number(w.target_tss)) + ' TSS'}</span><button type="button" class="secondary" data-workout-preview="${safe(w.id)}">View</button>${blocks ? `<button type="button" class="secondary" data-reuse-workout="${safe(w.id)}">Use as draft</button>` : '<small>Original targets cannot be safely converted to today’s builder.</small>'}</div></article>`; }).join('') : `<div class="list-empty">${query ? 'No saved workout matches this search.' : 'No saved workouts for this athlete yet.'}</div>`}</div><p class="helper">Templates and saved sessions open as drafts. Review the athlete’s current context and every block before saving.</p>`;
+}
+function useTemplate(id, day = new Date().getDay(), week = currentWeek()) {
+  const source = state.athlete?.workout_library?.find((w) => w.id === id);
+  if (!source) { setStatus('This template is no longer available. Refresh the athlete.', true); return; }
+  openBuilder('', day, week);
+  state.builder = { ...state.builder, headline: source.headline, description: source.description,
+    why_line: source.why_line, workout_type: source.workout_type, intent: source.intent,
+    blocks: source.blocks.map((block) => ({ ...block })) };
+  state.editorDirty = true;
+  renderBuilder();
+  $('#builder-error').textContent = 'Review this template for the athlete before saving it to the calendar.';
 }
 function reuseWorkout(id) {
   const source = state.athlete?.workouts.find((w) => w.id === id), blocks = source && reusableBlocks(source);
@@ -551,8 +611,8 @@ function renderBuilder() {
   const b = state.builder;
   const total = b.blocks.reduce((sum, x) => sum + Number(x.duration_min || 0), 0);
   const todayIndex = (new Date().getDay() + 6) % 7;
-  const days = ORDER.filter((d) => (d + 6) % 7 >= todayIndex).map((d) => [String(d), DAYS[d]]);
-  openEditor('builder', 'WORKOUT BUILDER', 'Create a session', `<p>Set the workout instructions and blocks, then save the session to this week.</p><div class="analysis-nav" role="group" aria-label="Workout creation method"><button type="button" class="secondary" data-builder-mode="manual" aria-pressed="${!b.assistant_mode}">Build manually</button><button type="button" class="secondary" data-builder-mode="ai" aria-pressed="${Boolean(b.assistant_mode)}">Draft with AI</button></div><div class="prompt-box" ${b.assistant_mode ? '' : 'hidden'}><label for="workout-prompt">Ask the assistant</label><textarea id="workout-prompt" placeholder="3 hours of Z2 with short bursts at the end">${safe(b.prompt)}</textarea><button type="button" class="secondary" data-draft>Draft workout</button><p id="draft-status" class="status" role="status"></p></div><div class="form-group"><label for="workout-day">Day this week</label><select id="workout-day">${optionMarkup(days, String(b.day_of_week))}</select></div><div class="form-group"><label for="workout-headline">Workout title</label><input id="workout-headline" maxlength="60" value="${safe(b.headline)}" placeholder="Long endurance with late surges"></div><div class="form-group"><label for="workout-description">Athlete instructions</label><textarea id="workout-description" rows="3" placeholder="Ride steadily in Z2, then finish with short controlled bursts.">${safe(b.description)}</textarea></div><div class="form-group"><label for="workout-why">Why this session</label><textarea id="workout-why" rows="2" placeholder="Build aerobic durability without a full intensity day.">${safe(b.why_line)}</textarea></div><div class="form-group"><label>Session blocks</label><div id="block-list" class="block-list">${builderBlocksMarkup()}</div><div class="builder-total"><span>Total planned time</span><strong id="builder-duration">${safe(minutesLabel(total))}</strong></div><button type="button" class="secondary" data-add-block>Add block</button><p class="helper">Drag blocks to reorder on desktop, or use the move buttons. Power targets follow the athlete’s FTP. The safety limit can shorten a session before it reaches the app.</p></div><p id="builder-error" class="form-error" role="alert"></p><div class="form-actions"><button type="button" class="primary" data-save-workout>Save to athlete’s week</button><button type="button" class="quiet" data-close>Cancel</button></div>`);
+  const days = ORDER.filter((d) => b.week_start_date !== currentWeek() || (d + 6) % 7 >= todayIndex).map((d) => [String(d), DAYS[d]]);
+  openEditor('builder', 'WORKOUT BUILDER', 'Create a session', `<p>Set the workout instructions and blocks, then save the session to ${b.week_start_date === currentWeek() ? 'this' : 'next'} week.</p><div class="analysis-nav" role="group" aria-label="Workout creation method"><button type="button" class="secondary" data-builder-mode="manual" aria-pressed="${!b.assistant_mode}">Build manually</button><button type="button" class="secondary" data-builder-mode="ai" aria-pressed="${Boolean(b.assistant_mode)}">Draft with AI</button></div><div class="prompt-box" ${b.assistant_mode ? '' : 'hidden'}><label for="workout-prompt">Ask the assistant</label><textarea id="workout-prompt" placeholder="3 hours of Z2 with short bursts at the end">${safe(b.prompt)}</textarea><button type="button" class="secondary" data-draft>Draft workout</button><p id="draft-status" class="status" role="status"></p></div><div class="form-group"><label for="workout-day">Day ${b.week_start_date === currentWeek() ? 'this' : 'next'} week</label><select id="workout-day">${optionMarkup(days, String(b.day_of_week))}</select></div><div class="form-group"><label for="workout-headline">Workout title</label><input id="workout-headline" maxlength="60" value="${safe(b.headline)}" placeholder="Long endurance with late surges"></div><div class="form-group"><label for="workout-description">Athlete instructions</label><textarea id="workout-description" rows="3" placeholder="Ride steadily in Z2, then finish with short controlled bursts.">${safe(b.description)}</textarea></div><div class="form-group"><label for="workout-why">Why this session</label><textarea id="workout-why" rows="2" placeholder="Build aerobic durability without a full intensity day.">${safe(b.why_line)}</textarea></div><div class="form-group"><label>Session blocks</label><div id="block-list" class="block-list">${builderBlocksMarkup()}</div><div class="builder-total"><span>Total planned time</span><strong id="builder-duration">${safe(minutesLabel(total))}</strong></div><button type="button" class="secondary" data-add-block>Add block</button><p class="helper">Drag blocks to reorder on desktop, or use the move buttons. Power targets follow the athlete’s FTP. The safety limit can shorten a session before it reaches the app.</p></div><p id="builder-error" class="form-error" role="alert"></p><div class="form-actions"><button type="button" class="primary" data-save-workout>Save to athlete’s ${b.week_start_date === currentWeek() ? 'this' : 'next'} week</button><button type="button" class="quiet" data-close>Cancel</button></div>`);
   const body = $('#drawer-body');
   const intro = body.firstElementChild; intro.classList.add('builder-intro');
   const chart = document.createElement('section'); chart.className = 'builder-timeline'; chart.id = 'builder-timeline';
@@ -571,9 +631,9 @@ function paintBuilderTimeline() {
   const total=blocks.reduce((sum,b)=>sum+b.minutes,0);
   root.innerHTML=`<div class="section-head"><h3>Session profile</h3><strong>${trainingMinutesLabel(total)}</strong></div><div class="builder-profile" role="img" aria-label="Planned workout blocks by duration and relative training zone">${blocks.map((b,i)=>`<div class="builder-profile-column" style="flex-grow:${b.minutes || 1}"><span>${safe(minutesLabel(b.minutes))}</span><i style="height:${(levels[b.zone]||2)/6*100}%" class="zone-${safe(b.zone)}"><b>${i+1}</b></i></div>`).join('')}</div><div class="builder-profile-caption"><span>Start</span><span>Relative training zone · block width shows duration</span><span>${trainingMinutesLabel(total)}</span></div>`;
 }
-function openBuilder(prompt = '', day = new Date().getDay()) {
+function openBuilder(prompt = '', day = new Date().getDay(), week = currentWeek()) {
   state.editorDirty = false;
-  state.builder = { prompt, assistant_mode: Boolean(prompt), day_of_week: day, headline: '', description: '', why_line: '', workout_type: 'endurance', intent: 'aerobic_base', blocks: [{ type: 'work', zone: 'endurance', duration_min: 60 }] };
+  state.builder = { prompt, assistant_mode: Boolean(prompt), week_start_date: week, day_of_week: day, headline: '', description: '', why_line: '', workout_type: 'endurance', intent: 'aerobic_base', blocks: [{ type: 'work', zone: 'endurance', duration_min: 60 }] };
   renderBuilder();
 }
 async function draftWorkout() {
@@ -594,22 +654,33 @@ async function saveWorkout() {
   if (b.blocks.some((x) => !Number.isInteger(x.duration_min) || x.duration_min < 1 || x.duration_min > 180)) { $('#builder-error').textContent = 'Each block needs 1–180 minutes.'; return; }
   $('#builder-error').textContent = 'Saving the workout…';
   try {
-    const result = await portal('save_workout', { athlete_id: state.athleteId, client_date: localDate(), week_start_date: currentWeek(), day_of_week: b.day_of_week,
+    const result = await portal('save_workout', { athlete_id: state.athleteId, client_date: localDate(), week_start_date: b.week_start_date || currentWeek(), day_of_week: b.day_of_week,
       headline: b.headline, description: b.description, why_line: b.why_line, workout_type: b.workout_type, intent: b.intent, blocks: b.blocks });
-    closeDrawer(true); state.calendarWeek = currentWeek(); state.athleteSection = 'calendar'; await selectAthlete(state.athleteId);
+    closeDrawer(true); state.calendarWeek = b.week_start_date || currentWeek(); state.athleteSection = 'calendar'; await selectAthlete(state.athleteId);
     setStatus(result.safety_adjusted ? 'Workout saved. Trainable shortened it to the athlete’s safety limit; review the updated duration.' : 'Workout saved to the athlete’s live week.');
   } catch (error) { $('#builder-error').textContent = error.message; }
 }
 async function reviewWeek() {
   setStatus('The assistant is reviewing the week…');
   try {
-    const result = await portal('suggest_week', { athlete_id: state.athleteId, client_date: localDate() });
-    const d = result.draft;
-    state.editorDirty = true;
-    state.builder = { ...d, prompt: '', day_of_week: result.suggested_day_of_week };
-    renderBuilder(); $('#draft-status').textContent = 'Assistant suggestion. Check the day and blocks before saving.';
+    const result = await portal('review_week_ai', { athlete_id: state.athleteId, client_date: localDate() });
+    const review = result.review;
+    openDrawer('THIS WEEK / AI REVIEW', 'Week review', `<div class="week-review-result"><p>${safe(review.summary || 'Review complete.')}</p><p>${safe(review.finding || '')}</p><p class="helper">${review.recommendation === 'new_workout' ? 'A workout is suggested for coach review. The plan has not changed.' : 'No plan change is proposed. You can still ask for a new workout.'}</p><div class="form-actions">${review.template_id ? `<button type="button" class="primary" data-review-template="${safe(review.template_id)}" data-review-day="${Number(review.target_day_of_week)}">Review proposed workout</button>` : ''}<button type="button" class="secondary" data-review-ask>Ask for new workout</button><button type="button" class="quiet" data-close>Keep current plan</button></div></div>`);
     setStatus('');
   } catch (error) { setStatus(error.message, true); }
+}
+function nextEditableWorkoutDay() {
+  const plan = state.athlete?.plans.find((p) => p.week_start_date === currentWeek());
+  const todayIndex = (new Date().getDay() + 6) % 7;
+  return ORDER.find((day) => (day + 6) % 7 >= todayIndex &&
+    !state.athlete?.workouts.some((w) => w.plan_id === plan?.id && w.day_of_week === day &&
+      (w.completed || w.actual_activity_id || w.prescription_source === 'human_coach' || ['race', 'race_warmup'].includes(w.workout_type))));
+}
+function askForNewWorkout(context = '') {
+  const day = nextEditableWorkoutDay();
+  const prompt = `Draft a conservative cycling workout based on this review: ${context || 'Review the athlete’s recent rides and current training week.'}`.slice(0, 800);
+  openBuilder(prompt, day ?? 1, day == null ? nextWeek() : currentWeek());
+  $('#draft-status').textContent = day == null ? 'This week has no editable day. Drafting for next week; review the day before saving.' : 'Review the request, then draft a workout. Nothing has changed on the calendar.';
 }
 function nextWeek() { const d = new Date(currentWeek() + 'T12:00:00'); d.setDate(d.getDate() + 7); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); }
 function weekMinutes(day) { return day.locked ? (day.existing || []).reduce((n, w) => n + (Number(w.target_duration_min) || 0), 0)
@@ -654,9 +725,9 @@ function renderWeekEditor() {
   const hasStoredDays = state.athlete?.workouts?.some((w) => w.plan_id === storedPlan?.id);
   const selector = `<div class="form-group"><label for="week-start">Planning week</label><select id="week-start"><option value="${currentWeek()}" ${selected === currentWeek() ? 'selected' : ''}>This week · ${safe(dateLabel(currentWeek()))}</option><option value="${nextWeek()}" ${selected === nextWeek() ? 'selected' : ''}>Next week · ${safe(dateLabel(nextWeek()))}</option></select></div>`;
   const focus = `<div class="form-group"><label for="week-focus">Coach focus, optional</label><textarea id="week-focus" rows="2" maxlength="500" placeholder="Build aerobic base, with one sprint session">${safe(d?.focus || '')}</textarea><p class="helper">A short direction for the assistant. You can change every draft day before publishing.</p></div>`;
-  const content = d ? `<div class="callout"><strong>Conservative baseline</strong><p>${safe(d.summary || 'A balanced starting point for coach review.')}</p><small>Recent cycling average: ${safe(trainingMinutesLabel(d.evidence.recent_average_min))} per week · Draft ceiling: ${safe(trainingMinutesLabel(d.evidence.baseline_cap_min))} · Single-session evidence limit: ${safe(trainingMinutesLabel(d.evidence.session_cap_min))}. ${d.notes_considered ? `${d.notes_considered} athlete note${d.notes_considered === 1 ? '' : 's'} considered.` : 'No athlete notes yet.'}${d.evidence.sessions < 2 ? ' Recent riding is limited, so review the starting load closely.' : ''}</small></div><div class="week-edit-list">${d.days.map(weekDayMarkup).join('')}</div><div class="week-review"><div><span>Reviewed week</span><strong id="week-total"></strong></div><p>AI prepared the baseline. You decide whether to publish it; fixed days stay in place.</p><div id="week-load-warning" class="callout warning" hidden><label class="acknowledge"><input id="week-acknowledge" type="checkbox"> I reviewed the added load above the conservative baseline.</label></div><p id="week-error" class="form-error" role="alert"></p><button type="button" class="primary" data-publish-week>Publish reviewed week</button><button type="button" class="quiet" data-generate-week>Generate a new baseline</button></div>` : `<div class="list-empty"><strong>Start with a safe baseline</strong><p>The assistant drafts the whole week from recent training, recovery, goals and athlete notes. Completed work and races stay fixed.</p><button type="button" class="primary" data-generate-week>Generate baseline week</button></div>`;
-  const resetAction = hasStoredDays ? `<div class="reset-week-action"><p>Want to start this planned week again? Review what can be removed before rebuilding it.</p><button type="button" class="quiet" data-reset-week>Delete planned week</button></div>` : '';
-  openEditor('week', 'WEEK BUILDER', 'Build the full week', `<p>Build a conservative starting week, then make the coaching decisions together.</p>${selector}${focus}<p id="week-status" class="status" role="status"></p>${content}${resetAction}`);
+  const content = d ? `<div class="callout"><strong>Training load draft</strong><p>${safe(d.summary || 'A balanced starting point for coach review.')}</p><small>Recent cycling average: ${safe(trainingMinutesLabel(d.evidence.recent_average_min))} per week · Draft ceiling: ${safe(trainingMinutesLabel(d.evidence.baseline_cap_min))} · Single-session evidence limit: ${safe(trainingMinutesLabel(d.evidence.session_cap_min))}. ${d.notes_considered ? `${d.notes_considered} athlete note${d.notes_considered === 1 ? '' : 's'} considered.` : 'No athlete notes yet.'}${d.evidence.sessions < 2 ? ' Recent riding is limited, so review the starting load closely.' : ''}</small></div><div class="week-edit-list">${d.days.map(weekDayMarkup).join('')}</div><div class="week-review"><div><span>Reviewed week</span><strong id="week-total"></strong></div><p>AI prepared the baseline. You decide whether to publish it; fixed days stay in place.</p><div id="week-load-warning" class="callout warning" hidden><label class="acknowledge"><input id="week-acknowledge" type="checkbox"> I reviewed the added load above the recent training or coach target.</label></div><p id="week-error" class="form-error" role="alert"></p><button type="button" class="primary" data-publish-week>Publish reviewed week</button><div class="week-review-actions"><button type="button" class="quiet" data-generate-week>Refresh week</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>` : `<div class="list-empty"><strong>Build the training week</strong><p>The assistant drafts the whole week using recent training, coach targets, recovery, goals and athlete notes. Completed work and races stay fixed.</p><div class="week-review-actions"><button type="button" class="primary" data-generate-week>Generate draft week</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>`;
+
+  openEditor('week', 'WEEK BUILDER', 'Build the full week', `<p>Build the training week from the available evidence and coach direction, then review every day.</p>${selector}${focus}<p id="week-status" class="status" role="status"></p>${content}`);
   if (d) updateWeekTotal();
 }
 function openWeek(weekStart = currentWeek()) { state.weekDraft = null; state.weekSelection = weekStart; state.editorDirty = false; renderWeekEditor(); }
@@ -673,15 +744,15 @@ async function generateWeek(afterReset = false) {
   const week_start_date = $('#week-start').value; const focus = $('#week-focus').value.trim();
   state.weekGenerating = true;
   const button = $('[data-generate-week]'); if (button) button.disabled = true;
-  $('#week-status').textContent = 'Building a conservative week…';
+  $('#week-status').textContent = 'Building the training week…';
   try {
     const result = await portal('draft_week', { athlete_id: state.athleteId, week_start_date,
       client_date: localDate(), focus });
     state.weekSelection = week_start_date; state.weekDraft = { ...result, focus }; state.editorDirty = true;
     renderWeekEditor(); $('#week-status').textContent = afterReset
-      ? 'Planned days deleted. Your new baseline is ready to review.'
-      : 'Baseline ready. Review each day before publishing.';
-  } catch (error) { setStatus(afterReset ? `Planned days deleted. Generate a new baseline when ready. ${error.message}` : error.message, true, '#week-status'); }
+      ? 'Planned days deleted. Your new draft is ready to review.'
+      : 'Draft ready. Review each day before publishing.';
+  } catch (error) { setStatus(afterReset ? `Planned days deleted. Generate a new draft when ready. ${error.message}` : error.message, true, '#week-status'); }
   finally { state.weekGenerating = false; if (button?.isConnected) button.disabled = false; }
 }
 async function previewResetWeek() {
@@ -702,7 +773,7 @@ async function previewResetWeek() {
     const athlete = state.athlete?.profile?.display_name || 'this athlete';
     $('#reset-week-title').textContent = `Delete the ${dateLabel(week_start_date)} week for ${athlete}?`;
     const count = result.removable.length;
-    $('#reset-week-copy').textContent = `This removes ${count} editable planned day${count === 1 ? '' : 's'} and prepares a fresh baseline for coach review. ${result.preserved.length} protected day${result.preserved.length === 1 ? '' : 's'} will stay. Past days, completed sessions, races and recorded work are always kept.${state.weekDraft ? ' Your unsaved draft will also be discarded.' : ''}`;
+    $('#reset-week-copy').textContent = `This removes ${count} editable planned day${count === 1 ? '' : 's'}. No replacement week will be generated. ${result.preserved.length} protected day${result.preserved.length === 1 ? '' : 's'} will stay. Past days, completed sessions, races and recorded work are always kept.${state.weekDraft ? ' Your unsaved draft will also be discarded.' : ''}`;
     setStatus('', false, '#week-status');
     $('#reset-week-dialog').returnValue = 'cancel';
     $('#reset-week-dialog').showModal(); $('#cancel-reset-week').focus();
@@ -722,7 +793,7 @@ async function resetWeek(snapshot) {
     state.weekDraft = null; state.editorDirty = false; state.weekSelection = snapshot.week_start_date;
     state.athlete = await portal('read_athlete', { athlete_id: state.athleteId });
     renderAthlete(); renderWeekEditor();
-    await generateWeek(true);
+    setStatus('Editable planned days deleted. You can leave this week empty or plan it later.', false, '#week-status');
   } catch (error) {
     setStatus(removed ? `Planned days were deleted, but the view could not refresh. ${error.message}` : error.message, true, '#week-status');
   } finally {
@@ -948,6 +1019,26 @@ $('.attention-filters').addEventListener('click', (event) => {
 $('#attention-list').addEventListener('click', async (event) => {
   if (event.target.closest('[data-attention-retry]')) { await showAttention(); return; }
   if (event.target.closest('[data-attention-athletes]')) { showAthletes(); return; }
+  const proposed = event.target.closest('[data-attention-template]');
+  if (proposed) {
+    const item = state.attention.items.find((row) => row.id === proposed.dataset.attentionTemplate);
+    if (!item?.ride_review?.template_id) return;
+    showAthletes(false, false);
+    await selectAthlete(item.athlete_id, { openDetail: true, pushRoute: true });
+    const proposedWeek = item.ride_review.week_start_date;
+    useTemplate(item.ride_review.template_id, Number(item.ride_review.target_day_of_week),
+      proposedWeek === currentWeek() || proposedWeek === nextWeek() ? proposedWeek : nextWeek());
+    return;
+  }
+  const ask = event.target.closest('[data-attention-ask]');
+  if (ask) {
+    const item = state.attention.items.find((row) => row.id === ask.dataset.attentionAsk);
+    if (!item) return;
+    showAthletes(false, false);
+    await selectAthlete(item.athlete_id, { openDetail: true, pushRoute: true });
+    askForNewWorkout(`${item.ride_review?.summary || ''} ${item.ride_review?.finding || ''}`);
+    return;
+  }
   const review = event.target.closest('[data-attention-review]');
   if (review) {
     review.disabled = true;
@@ -965,6 +1056,7 @@ $('#attention-list').addEventListener('click', async (event) => {
     showAthletes(false, false);
     await selectAthlete(athlete.dataset.attentionAthlete, { openDetail: true, pushRoute: true });
     if (athlete.dataset.attentionPlan === 'true' && state.athleteId === athlete.dataset.attentionAthlete && state.athlete) openWeek(nextWeek());
+    if (athlete.dataset.attentionRide && state.athleteId === athlete.dataset.attentionAthlete && state.athlete) openActivity(athlete.dataset.attentionRide);
     scrollTo(0, 0);
   }
 });
@@ -998,11 +1090,13 @@ addEventListener('popstate', () => {
 });
 $('#athlete-pane').addEventListener('click', (event) => {
   const section = event.target.closest('[data-athlete-section]');
-  if (section) { state.athleteSection = section.dataset.athleteSection; renderAthlete(); $(`[data-athlete-section="${state.athleteSection}"]`).focus(); return; }
+  if (section) { state.athleteSection = section.dataset.athleteSection; if (state.athleteSection === 'calendar') { state.calendarWeek = currentWeek(); state.calendarMonth = localDate().slice(0,7); } renderAthlete(); $(`[data-athlete-section="${state.athleteSection}"]`).focus(); return; }
   const layout = event.target.closest('[data-calendar-layout]');
   if (layout) { state.calendarLayout = layout.dataset.calendarLayout; if (state.calendarLayout === 'month') state.calendarMonth = state.calendarWeek.slice(0,7); renderAthlete(); $(`[data-calendar-layout="${state.calendarLayout}"]`).focus(); return; }
   const preview = event.target.closest('[data-workout-preview]');
   if (preview) { preview.focus(); previewWorkout(preview.dataset.workoutPreview); return; }
+  const template = event.target.closest('[data-template-workout]');
+  if (template) { useTemplate(template.dataset.templateWorkout); return; }
   const reuse = event.target.closest('[data-reuse-workout]');
   if (reuse) { reuseWorkout(reuse.dataset.reuseWorkout); return; }
   const shift = event.target.closest('[data-week-shift]');
@@ -1026,17 +1120,35 @@ $('#athlete-pane').addEventListener('click', (event) => {
   if (action === 'build-week') openWeek(state.calendarWeek === nextWeek() ? nextWeek() : currentWeek());
   if (action === 'ai-workout') { openBuilder(); state.builder.assistant_mode = true; renderBuilder(); }
   if (action === 'review-week') reviewWeek();
+  if (action === 'save-athlete-settings') saveAthleteSettings();
+  if (action === 'use-estimated-ftp') {
+    const input = $('#athlete-settings-form [name="ftp_watts"]');
+    if (input) { input.value = event.target.closest('[data-estimate]').dataset.estimate; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); setStatus('Estimated FTP added to the form. Save to apply it.', false, '#athlete-settings-status'); }
+  }
   const noteId = event.target.closest('[data-archive-note]')?.dataset.archiveNote;
   if (noteId) { state.noteToArchive = noteId; $('#archive-note-dialog').showModal(); $('#keep-note').focus(); }
   const change = event.target.closest('[data-change]')?.dataset.change;
   if (change) { const [mi, ci] = change.split(':').map(Number); openBuilder(state.athlete.meetings[mi]?.proposed_changes[ci] || ''); }
 });
 $('#athlete-pane').addEventListener('input', (event) => {
+  if (event.target.closest('#athlete-settings-form') && (event.target.name === 'ftp_watts' || event.target.name?.startsWith('power_zone_'))) {
+    const form = $('#athlete-settings-form'), ftp = Number(form.elements.namedItem('ftp_watts')?.value);
+    for (const output of form.querySelectorAll('[data-zone-watts]')) {
+      const key = output.dataset.zoneWatts;
+      const low = Number(form.elements.namedItem(`power_zone_${key}_low`)?.value);
+      const high = Number(form.elements.namedItem(`power_zone_${key}_high`)?.value);
+      output.textContent = ftp > 0 && low > 0 && high > 0 ? `${Math.round(ftp*low/100)}–${Math.round(ftp*high/100)} W` : 'Set FTP and range';
+    }
+    return;
+  }
   if (event.target.id !== 'library-query') return;
   state.libraryQuery = event.target.value;
   const at = event.target.selectionStart;
   $('.library-section').innerHTML = libraryMarkup();
   const input = $('#library-query'); input.focus(); input.setSelectionRange(at,at);
+});
+$('#athlete-pane').addEventListener('submit', (event) => {
+  if (event.target.id === 'athlete-settings-form') { event.preventDefault(); saveAthleteSettings(); }
 });
 $('#invite-coach').addEventListener('click', invitePanel);
 $('#join-team').addEventListener('click', joinPanel);
@@ -1063,6 +1175,8 @@ document.addEventListener('keydown', (event) => {
 $('#drawer-body').addEventListener('click', async (event) => {
   const el = event.target.closest('button'); if (!el) return;
   if (el.hasAttribute('data-close')) closeDrawer();
+  if (el.hasAttribute('data-review-template')) { useTemplate(el.dataset.reviewTemplate, Number(el.dataset.reviewDay)); return; }
+  if (el.hasAttribute('data-review-ask')) { askForNewWorkout($('#drawer-body .week-review-result')?.textContent || ''); return; }
   if (el.hasAttribute('data-draft')) draftWorkout();
   if (el.hasAttribute('data-save-workout')) saveWorkout();
   if (el.hasAttribute('data-add-block')) { captureBuilder(); state.editorDirty = true; state.builder.blocks.push({ type: 'work', zone: 'endurance', duration_min: 10 }); renderBuilder(); }
