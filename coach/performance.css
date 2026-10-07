@@ -290,6 +290,7 @@ body:has(#auth-page:not([hidden])) .workspace-nav,body:has(#drawer:not([hidden])
 .overlay-scales span { display:flex; align-items:center; gap:4px; color:var(--channel); font-size:12px; }
 .overlay-scales i { width:12px; height:2px; background:var(--channel); }
 .overlay-scales strong { font-weight:400; color:var(--muted); }
+.overlay-scale-note { color:var(--muted); font-size:11px; margin:-6px 0 6px; }
 .trace-stack.is-overlay { display:block; }
 .trace-stack .chart-frame { border:0; }
 .trace-stack svg { touch-action:none; }
