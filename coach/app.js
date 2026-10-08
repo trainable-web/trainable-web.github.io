@@ -60,6 +60,16 @@ async function token() {
   }
   return current.access_token;
 }
+function assistantLimitMessage(data) {
+  const labels = { 'coach-portal-week': 'AI week planning', 'coach-week-review': 'AI week review',
+    'coach-portal-activity-analysis': 'AI activity review', 'coach-portal-interval-detection': 'AI interval detection',
+    'coach-portal-draft': 'AI workout drafting', 'coach-portal-minutes': 'AI meeting notes' };
+  const label = labels[data.feature] || 'The assistant';
+  const reset = new Date(data.resets_at);
+  const when = Number.isNaN(reset.getTime()) ? 'after the current 24-hour window'
+    : new Intl.DateTimeFormat(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(reset);
+  return `${label} has reached its ${Number(data.limit) || 'daily'}-request limit. New requests are available ${when}.`;
+}
 async function portal(action, payload = {}) {
   const request = (accessToken) => fetch(API + '/functions/v1/coach-portal', { method: 'POST',
     headers: { apikey: KEY, Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
@@ -70,7 +80,7 @@ async function portal(action, payload = {}) {
     response = await request(updated.access_token);
   }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) { const error = new Error(data.error || 'Trainable could not complete that action.'); error.status = response.status; error.authInvalid = response.status === 401; throw error; }
+  if (!response.ok) { const error = new Error(data.code === 'assistant_limit' ? assistantLimitMessage(data) : data.error || 'Trainable could not complete that action.'); error.status = response.status; error.code = data.code; error.authInvalid = response.status === 401; throw error; }
   return data;
 }
 async function wearables(action, payload = {}) {
@@ -791,7 +801,7 @@ function renderWeekEditor() {
   const hourRange = minimum == null && maximum == null ? '' : `<div class="week-hours-guidance"><strong>Coach’s weekly hours</strong><span>${minimum == null ? 'No minimum' : `${safe(minimum)} h minimum`} · ${maximum == null ? 'No maximum' : `${safe(maximum)} h maximum`}</span>${d ? '<small id="week-hours-range" role="status"></small>' : ''}</div>`;
   const selector = `<div class="form-group"><label for="week-start">Planning week</label><select id="week-start"><option value="${currentWeek()}" ${selected === currentWeek() ? 'selected' : ''}>This week · ${safe(dateLabel(currentWeek()))}</option><option value="${nextWeek()}" ${selected === nextWeek() ? 'selected' : ''}>Next week · ${safe(dateLabel(nextWeek()))}</option></select></div>`;
   const focus = `<div class="form-group"><label for="week-focus">Coach focus, optional</label><textarea id="week-focus" rows="2" maxlength="500" placeholder="Build aerobic base, with one sprint session">${safe(d?.focus || '')}</textarea><p class="helper">A short direction for the assistant. You can change every draft day before publishing.</p></div>`;
-  const content = d ? `<div class="callout"><strong>Training load draft</strong><p>${safe(d.summary || 'A balanced starting point for coach review.')}</p><small>Recent cycling average: ${safe(trainingMinutesLabel(d.evidence.recent_average_min))} per week · Draft ceiling: ${safe(trainingMinutesLabel(d.evidence.baseline_cap_min))} · Single-session evidence limit: ${safe(trainingMinutesLabel(d.evidence.session_cap_min))}. ${d.notes_considered ? `${d.notes_considered} athlete note${d.notes_considered === 1 ? '' : 's'} considered.` : 'No athlete notes yet.'}${d.evidence.sessions < 2 ? ' Recent riding is limited, so review the starting load closely.' : ''}</small></div><div class="week-edit-list">${d.days.map(weekDayMarkup).join('')}</div><div class="week-review"><div><span>Reviewed week</span><strong id="week-total"></strong></div><p>AI prepared the baseline. You decide whether to publish it; fixed days stay in place.</p><div id="week-load-warning" class="callout warning" hidden><label class="acknowledge"><input id="week-acknowledge" type="checkbox"> I reviewed the added load above the recent training or coach target.</label></div><p id="week-error" class="form-error" role="alert"></p><button type="button" class="primary" data-publish-week>Publish reviewed week</button><div class="week-review-actions"><button type="button" class="quiet" data-generate-week>Refresh week</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>` : `<div class="list-empty"><strong>Build the training week</strong><p>The assistant drafts the whole week using recent training, coach targets, recovery, goals and athlete notes. Completed work and races stay fixed.</p><div class="week-review-actions"><button type="button" class="primary" data-generate-week>Generate draft week</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>`;
+  const content = d ? `<div class="callout"><strong>Training load draft</strong><p>${safe(d.summary || 'A balanced starting point for coach review.')}</p><small>Recent cycling average: ${safe(trainingMinutesLabel(d.evidence.recent_average_min))} per week · Draft ceiling: ${safe(trainingMinutesLabel(d.evidence.baseline_cap_min))} · Single-session evidence limit: ${safe(trainingMinutesLabel(d.evidence.session_cap_min))}. ${d.notes_considered ? `${d.notes_considered} athlete note${d.notes_considered === 1 ? '' : 's'} considered.` : 'No athlete notes yet.'}${d.evidence.sessions < 2 ? ' Recent riding is limited, so review the starting load closely.' : ''}</small></div><div class="week-edit-list">${d.days.map(weekDayMarkup).join('')}</div><div class="week-review"><div><span>Reviewed week</span><strong id="week-total"></strong></div><p>AI prepared the baseline. You decide whether to publish it; fixed days stay in place.</p><div id="week-load-warning" class="callout warning" hidden><label class="acknowledge"><input id="week-acknowledge" type="checkbox"> I reviewed the added load above the recent training or coach target.</label></div><p id="week-error" class="form-error" role="alert"></p><button type="button" class="primary" data-publish-week>Publish reviewed week</button><div class="week-review-actions"><button type="button" class="quiet" data-generate-week>Refresh week</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>` : `<div class="list-empty"><strong>Build the training week</strong><p>The assistant drafts the whole week using recent training, coach targets, recovery, goals and athlete notes. Eight AI week drafts are available per rolling 24 hours. You can still use the workout library at any time.</p><div class="week-review-actions"><button type="button" class="primary" data-generate-week>Generate draft week</button><button type="button" class="secondary" data-open-workout-library>Use workout library</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>`;
 
   openEditor('week', 'WEEK BUILDER', 'Build the full week', `<p>Build the training week from the available evidence and coach direction, then review every day.</p>${selector}${hourRange}${focus}<p id="week-status" class="status" role="status"></p>${content}`);
   if (d) updateWeekTotal();
@@ -818,7 +828,8 @@ async function generateWeek(afterReset = false) {
     renderWeekEditor(); $('#week-status').textContent = afterReset
       ? 'Planned days deleted. Your new draft is ready to review.'
       : 'Draft ready. Review each day before publishing.';
-  } catch (error) { setStatus(afterReset ? `Planned days deleted. Generate a new draft when ready. ${error.message}` : error.message, true, '#week-status'); }
+  } catch (error) { const message = error.code === 'assistant_limit' ? `${error.message} Use the workout library to add sessions now.` : error.message;
+    setStatus(afterReset ? `Planned days deleted. Generate a new draft when ready. ${message}` : message, true, '#week-status'); }
   finally { state.weekGenerating = false; if (button?.isConnected) button.disabled = false; }
 }
 async function previewResetWeek() {
@@ -1280,6 +1291,11 @@ $('#drawer-body').addEventListener('click', async (event) => {
   if (el.hasAttribute('data-analyze-minutes')) analyzeMinutes();
   if (el.hasAttribute('data-save-minutes')) saveMinutes();
   if (el.hasAttribute('data-save-note')) saveNote();
+  if (el.hasAttribute('data-open-workout-library')) {
+    closeDrawer();
+    if ($('#drawer').hidden) { state.athleteSection = 'library'; renderAthlete(); $('[data-athlete-section="library"]')?.focus(); }
+    return;
+  }
   if (el.hasAttribute('data-generate-week')) generateWeek();
   if (el.hasAttribute('data-reset-week')) previewResetWeek();
   if (el.hasAttribute('data-publish-week')) publishWeek();
