@@ -175,6 +175,10 @@ function recoveryMarkup(t) {
 // deno-lint-ignore no-unused-vars
 function profileMarkup() {
   const d = state.athlete, p = d.profile || {}, z = d.zones || {}, c = d.training_context || {};
+  const history = d.profile_changes || [];
+  const changedWhen = (value) => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Date unavailable';
+  const latestChange = history[0];
+  const historyRows = history.map((entry) => `<div class="meeting-row"><strong>${safe(changedWhen(entry.changed_at))} · ${safe(entry.actor_name)}</strong><p>${(entry.changes || []).map((change) => safe(change)).join(' · ')}</p></div>`).join('');
   const field = (name, label, value, type = 'text', attrs = '') => `<label class="profile-edit-field">${label}<input name="${name}" type="${type}" value="${safe(value ?? '')}" ${attrs}></label>`;
   const choose = (name, label, value, options) => `<label class="profile-edit-field">${label}<select name="${name}">${options.map(([v, t]) => `<option value="${v}" ${value === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>`;
   const estimate = Number(z.estimated_ftp_watts);
@@ -188,6 +192,7 @@ function profileMarkup() {
   }).join('');
   return `<div class="section-head"><h3>Athlete profile & zones</h3><button type="button" class="secondary" data-action="new-note">Add athlete note</button></div>
     <p class="helper">You can edit the athlete’s training settings. Saved thresholds change future targets; past workout records stay as recorded. AI suggestions still require your review.</p>
+    ${latestChange ? `<p class="helper"><strong>Last changed ${safe(changedWhen(latestChange.changed_at))} by ${safe(latestChange.actor_name)}.</strong> ${safe((latestChange.changes || []).slice(0, 2).join(' · '))}</p>` : ''}
     <form id="athlete-settings-form" class="athlete-settings-form" novalidate>
       <section class="settings-panel"><div class="section-head"><h4>Profile</h4></div><div class="profile-edit-grid">
         ${field('display_name','Name',p.display_name,'text','required maxlength="80"')}
@@ -214,14 +219,15 @@ function profileMarkup() {
         ${field('block_end_date','Block ends',c.block_end_date,'date')}
         ${field('block_length_weeks','Block length (weeks)',c.block_length_weeks,'number','min="1" max="52" step="1"')}
         ${field('recovery_week_start_date','Recovery week starts (Monday)',c.recovery_week_start_date,'date')}
-        ${field('target_weekly_hours','Target hours per week',c.target_weekly_hours,'number','min="0" max="40" step="0.25"')}
+        ${field('min_weekly_hours','Minimum hours per week',c.min_weekly_hours,'number','min="0" max="40" step="0.25"')}
+        ${field('max_weekly_hours','Maximum hours per week',c.max_weekly_hours ?? c.target_weekly_hours,'number','min="0" max="40" step="0.25"')}
         ${field('training_days_per_week','Training days per week',c.training_days_per_week,'number','min="1" max="7" step="1"')}
         ${field('training_cycle_days','Training rhythm (days)',c.training_cycle_days || 7,'number','min="3" max="14" step="1"')}
         <label class="settings-check"><input name="repeat_workouts_ok" type="checkbox" ${c.repeat_workouts_ok !== false ? 'checked' : ''}>Repeating useful workouts is OK</label>
-      </div><label class="settings-wide-label">Block focus and coach instructions<textarea name="block_focus" rows="3" maxlength="600" placeholder="For example: three-week VO₂max build; keep Tuesday intervals hard unless execution or athlete feedback changes.">${safe(c.block_focus || '')}</textarea></label></section>
+      </div><p class="helper">The AI plans the whole week within these hours, including workouts already on the calendar. If the days available cannot fit the minimum, it will tell you before publishing.</p><label class="settings-wide-label">Block focus and coach instructions<textarea name="block_focus" rows="3" maxlength="600" placeholder="For example: three-week VO₂max build; keep Tuesday intervals hard unless execution or athlete feedback changes.">${safe(c.block_focus || '')}</textarea></label></section>
       <section class="settings-panel"><div class="section-head"><h4>Weekly availability</h4></div><p class="helper">Minutes available each day. Leave blank when unknown; enter 0 for unavailable.</p><div class="availability-edit">${ORDER.map((day) => `<div><label>${DAYS[day]}<input name="availability_${day}" type="number" min="0" max="1440" step="1" value="${safe(p.day_availability_min?.[day] ?? '')}"></label><label class="settings-check"><input name="rest_${day}" type="checkbox" ${(p.preferred_rest_days || []).includes(day) ? 'checked' : ''}>Preferred rest</label></div>`).join('')}</div></section>
       <div class="profile-save-bar"><p id="athlete-settings-status" class="status" role="status"></p><button type="button" class="primary" data-action="save-athlete-settings">Save athlete settings</button></div>
-    </form><section class="settings-panel"><h4>Goals</h4>${tableMarkup(['Target date','Event / goal','Target FTP','Weekly hours','Recent longest session','Notes'],(d.goals || []).map((g) => [safe(utcLabel(g.target_date)),safe(title(g.event_type) || 'Training goal'),numberLabel(g.target_ftp_watts,' W'),numberLabel(g.weekly_hours_available,' h',1),numberLabel(g.recent_longest_session_min,' min'),safe(g.notes || '—')]))}</section>`;
+    </form><section class="settings-panel"><h4>Recent setting changes</h4>${historyRows || '<p class="helper">No coach changes recorded yet.</p>'}</section><section class="settings-panel"><h4>Goals</h4>${tableMarkup(['Target date','Event / goal','Target FTP','Weekly hours','Recent longest session','Notes'],(d.goals || []).map((g) => [safe(utcLabel(g.target_date)),safe(title(g.event_type) || 'Training goal'),numberLabel(g.target_ftp_watts,' W'),numberLabel(g.weekly_hours_available,' h',1),numberLabel(g.recent_longest_session_min,' min'),safe(g.notes || '—')]))}</section>`;
 }
 async function openActivity(id) {
   const request = ++analysis.detailRequest, athlete = state.athleteId;
@@ -283,11 +289,68 @@ function lapMarkup(d) {
   const selectedTable = selected.length >= 2 ? `<div class="selected-lap-comparison"><h4>Selected laps</h4>${tableMarkup(['Lap','Elapsed','Distance','Avg power','Max power','Avg HR','Max HR','Cadence','Avg speed'],selected.map(({lap:l,i}) => [safe(label(l,i)),elapsedLabel(l.elapsed_s),numberLabel(l.distance_m == null ? null : l.distance_m/1000,' km',2),numberLabel(l.avg_watts,' W'),numberLabel(l.max_watts,' W'),numberLabel(l.avg_hr,' bpm'),numberLabel(l.max_hr,' bpm'),numberLabel(l.avg_cadence,' rpm'),numberLabel(l.avg_speed_ms == null ? null : l.avg_speed_ms*3.6,' km/h',1)]))}</div>` : '<p class="helper">Check two or more laps to compare their saved measurements side by side.</p>';
   return `<p class="helper">Select a lap to focus the traces and calculate full-sample statistics. Check laps to compare their saved measurements. Bars show average power; missing power has an empty bar.${exceedsTrace ? ' A saved lap extends beyond the recorded trace; its focus range is clipped to available samples.' : ''}</p><div class="lap-comparison" role="group" aria-label="Lap comparison">${compare}</div>${selectedTable}<details class="data-disclosure"><summary>All lap measurements</summary>${tableMarkup(['Lap','Start','Elapsed','Moving','Distance','Avg power','Max power','Avg HR','Max HR','Cadence','Avg speed','Elevation'],rows)}</details>`;
 }
+function aiReviewChart(points, label, unit, color, duration, baseline = false) {
+  const measured = (points || []).filter(([time, value]) => Number.isFinite(time) && Number.isFinite(value));
+  if (!measured.length) return `<div class="ai-review-chart-empty">No recorded ${safe(label.toLowerCase())} trace.</div>`;
+  const width = 720, height = 168, left = 48, right = 710, top = 14, bottom = 132;
+  const values = measured.map((point) => point[1]);
+  const low = baseline ? 0 : Math.max(0, Math.floor((Math.min(...values) - 10) / 10) * 10);
+  const high = Math.max(low + 1, baseline ? Math.ceil(Math.max(...values) * 1.08 / 50) * 50
+    : Math.ceil((Math.max(...values) + 8) / 10) * 10);
+  const end = Math.max(1, duration || measured.at(-1)[0]);
+  const x = (time) => left + Math.max(0, Math.min(1, time / end)) * (right - left);
+  const y = (value) => bottom - Math.max(0, Math.min(1, (value - low) / (high - low))) * (bottom - top);
+  let penUp = true;
+  const path = smoothTracePoints(points || [], 60).map(([time, value]) => {
+    if (!Number.isFinite(time) || !Number.isFinite(value)) { penUp = true; return ''; }
+    // Stream previews already insert nulls at actual recording gaps. Their normal
+    // bucket spacing can exceed ten seconds on a long ride, so time alone cannot
+    // decide whether a line should break.
+    const command = penUp ? 'M' : 'L';
+    penUp = false;
+    return `${command}${x(time).toFixed(1)},${y(value).toFixed(1)}`;
+  }).join(' ');
+  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${safe(label)} over the recorded activity, in ${safe(unit)}. Exact averages appear in the measurements below.">
+    <title>${safe(label)} during the ride</title>
+    ${[0,.5,1].map((fraction) => { const gridY = top + fraction * (bottom-top); return `<line x1="${left}" x2="${right}" y1="${gridY}" y2="${gridY}" stroke="#e3e8f0"/><text x="${left-8}" y="${gridY+4}" text-anchor="end">${numberLabel(high - fraction * (high-low))}</text>`; }).join('')}
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    ${[0,.5,1].map((fraction) => `<text x="${x(end*fraction)}" y="${height-8}" text-anchor="${fraction === 0 ? 'start' : fraction === 1 ? 'end' : 'middle'}">${elapsedLabel(end*fraction)}</text>`).join('')}
+  </svg>`;
+}
+function aiReviewMeasurements(d) {
+  const a = d.activity || {}, full = d.full_trace_stats, half = d.half_trace_stats;
+  const metric = (stats, key) => stats?.metrics?.[key]?.average;
+  const power = metric(full, 'watts') ?? a.avg_power;
+  const heart = metric(full, 'heartrate') ?? a.avg_hr;
+  const primary = [
+    ['Moving time',elapsedLabel(a.moving_s ?? a.duration_s),'Time in motion'],
+    ['Distance',numberLabel(a.distance_m == null ? null : a.distance_m / 1000,' km',1),'Recorded ride'],
+    ['Average power',numberLabel(power,' W'),'Ride output'],
+    ['Average heart rate',numberLabel(heart,' bpm'),'Heart response'],
+  ];
+  const secondary = [
+    ['Effort-adjusted power',numberLabel(full?.normalized_power_w ?? a.strava_weighted_avg_watts,' W'),'Accounts for power surges'],
+    ['Highest power',numberLabel(full?.metrics?.watts?.maximum ?? a.strava_max_watts,' W'),'Recorded peak'],
+    ['Average cadence',numberLabel(metric(full,'cadence') ?? a.avg_cadence,' rpm'),'Pedal revolutions per minute'],
+    ['Average speed',numberLabel((metric(full,'velocity_ms') ?? a.avg_speed_ms) == null ? null : (metric(full,'velocity_ms') ?? a.avg_speed_ms) * 3.6,' km/h',1),'Distance per hour'],
+    ['Climbing',numberLabel(a.elevation_gain,' m'),'Elevation gained'],
+    ['Training stress',numberLabel(a.raw_tss,' TSS'),'Only when recorded'],
+  ];
+  const rows = half?.length === 2 ? [
+    ['First half',half[0]],['Second half',half[1]],
+  ] : [];
+  return `<div class="ai-review-metrics" aria-label="Recorded ride measurements">${primary.map(([label,value,detail]) => `<div><span>${label}</span><strong>${value}</strong><small>${detail}</small></div>`).join('')}</div>
+    <div class="ai-review-chart-grid"><section><div class="ai-review-chart-title"><h4>Power through the ride</h4><span>watts</span></div>${aiReviewChart(d.channels?.watts,'Power','watts','#a627d6',d.stream_duration_s,true)}</section>
+    <section><div class="ai-review-chart-title"><h4>Heart rate through the ride</h4><span>beats per minute</span></div>${aiReviewChart(d.channels?.heartrate,'Heart rate','beats per minute','#e64e56',d.stream_duration_s)}</section></div>
+    <p class="ai-review-method">The charts use a 60-second display smoothing. Numbers below use the full saved recording where available; gaps remain blank.</p>
+    <div class="ai-review-detail-grid"><section><h4>More measurements</h4><dl>${secondary.map(([label,value,detail]) => `<div><dt>${label}<small>${detail}</small></dt><dd>${value}</dd></div>`).join('')}</dl></section>
+    <section><h4>How the ride changed</h4>${rows.length ? `<table><thead><tr><th scope="col">Half</th><th scope="col">Power</th><th scope="col">Heart rate</th><th scope="col">Cadence</th></tr></thead><tbody>${rows.map(([name,stats]) => `<tr><th scope="row">${name}</th><td>${numberLabel(metric(stats,'watts'),' W')}</td><td>${numberLabel(metric(stats,'heartrate'),' bpm')}</td><td>${numberLabel(metric(stats,'cadence'),' rpm')}</td></tr>`).join('')}</tbody></table><p class="helper">Two equal parts of the recorded time. Changes alone do not explain their cause.</p>` : '<p class="helper">Half-ride comparison needs at least 20 minutes of saved trace data.</p>'}</section></div>`;
+}
 function aiReportMarkup() {
   const r = analysis.aiReport;
-  if (!r) return '<p class="helper">No analysis generated for this activity.</p>';
-  const list = (heading, items) => items?.length ? `<h4>${heading}</h4><ul>${items.map((v)=>`<li>${safe(v)}</li>`).join('')}</ul>` : '';
-  return `<p>${safe(r.summary)}</p>${list('Observed',r.observations)}${list('Uncertain or missing',r.uncertainties)}${list('Questions for the coach',r.coach_questions)}<p class="helper">AI interpretation. Check each statement against the recorded charts and lap data.</p>`;
+  if (!r) return '<div class="ai-review-prompt"><strong>Measurements first. Interpretation when you need it.</strong><p>Generate a brief coach note to connect the numbers above with the saved laps and comparable rides. It will flag missing context without changing the plan.</p></div>';
+  const list = (heading, items, className) => items?.length ? `<section class="${className}"><h4>${heading}</h4><ul>${items.map((v)=>`<li>${safe(v)}</li>`).join('')}</ul></section>` : '';
+  return `<div class="ai-review-report"><div class="ai-review-takeaway"><span>COACH TAKEAWAY</span><strong>${safe(r.summary)}</strong></div><div class="ai-review-notes">${list('What stands out',r.observations,'ai-review-observed')}${list('Check before changing the plan',r.uncertainties,'ai-review-cautions')}${list('Ask the athlete',r.coach_questions,'ai-review-questions')}</div><p class="ai-review-method">AI interpretation for the coach. Confirm each finding against the charts and laps; you decide whether the plan changes.</p></div>`;
 }
 function detectedIntervalsMarkup() {
   const result = analysis.detectedIntervals;
@@ -319,7 +382,7 @@ function renderActivity() {
     <section id="panel-power" role="tabpanel" aria-labelledby="tab-power" data-analysis-panel="power" hidden><div class="power-review-grid"><section><div class="section-head"><h3>Power-duration curve</h3><span>This activity</span></div>${curve.length > 1 ? powerDurationChart(curve.map(([s,w])=>({seconds:Number(s),watts:w}))) : '<p class="chart-empty">No power-duration curve saved.</p>'}<p class="helper">Best average power by duration${a.device_watts !== true ? '; power may be estimated' : ''}.</p>${tableMarkup(['Duration','Best average power'],curve.map(([s,w]) => [elapsedLabel(Number(s)),numberLabel(w,' W')]),'No power-duration record saved.')}</section><section id="activity-power-hr"><h3>Power and heart rate</h3>${powerHrMarkup(d)}</section></div></section>
     <section id="panel-laps" role="tabpanel" aria-labelledby="tab-laps" data-analysis-panel="laps" hidden><div id="activity-laps"><h3>Laps & intervals</h3>${lapMarkup(d)}</div></section>
     <section id="panel-execution" role="tabpanel" aria-labelledby="tab-execution" data-analysis-panel="execution" hidden><section id="activity-execution"><h3>Planned versus recorded</h3>${plannedComparison(d)}</section></section>
-    <section id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" data-analysis-panel="notes" hidden><div class="activity-notes-grid"><section><h3>Athlete feedback</h3><p>Feeling (1–5): ${safe(a.feeling == null ? 'Not recorded' : title(a.feeling))}</p><p class="preserve-lines">${safe(a.athlete_comment || 'No athlete comment recorded.')}</p>${a.strava_description ? `<h3>Activity notes</h3><p class="preserve-lines">${safe(a.strava_description)}</p>` : ''}${a.ai_insight ? `<details class="data-disclosure"><summary>Saved AI interpretation</summary><p class="preserve-lines">${safe(typeof a.ai_insight === 'string' ? a.ai_insight : JSON.stringify(a.ai_insight))}</p></details>` : ''}</section>${comparableMarkup(d)}</div></section><section id="panel-ai" role="tabpanel" aria-labelledby="tab-ai" data-analysis-panel="ai" hidden><section id="activity-ai"><div class="section-head"><div><h3>AI review</h3><p class="helper">Evidence-based interpretation of the recorded workout for coach review.</p></div><button type="button" class="secondary" data-ai-activity>Generate review</button></div><p class="helper">Requires the athlete’s AI data-sharing permission. The report is generated on demand and is not saved automatically.</p><div id="activity-ai-result" aria-live="polite">${aiReportMarkup()}</div></section></section></div></div>`;
+    <section id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" data-analysis-panel="notes" hidden><div class="activity-notes-grid"><section><h3>Athlete feedback</h3><p>Feeling (1–5): ${safe(a.feeling == null ? 'Not recorded' : title(a.feeling))}</p><p class="preserve-lines">${safe(a.athlete_comment || 'No athlete comment recorded.')}</p>${a.strava_description ? `<h3>Activity notes</h3><p class="preserve-lines">${safe(a.strava_description)}</p>` : ''}${a.ai_insight ? `<details class="data-disclosure"><summary>Saved AI interpretation</summary><p class="preserve-lines">${safe(typeof a.ai_insight === 'string' ? a.ai_insight : JSON.stringify(a.ai_insight))}</p></details>` : ''}</section>${comparableMarkup(d)}</div></section><section id="panel-ai" role="tabpanel" aria-labelledby="tab-ai" data-analysis-panel="ai" hidden><section id="activity-ai"><div class="ai-review-heading"><div><p class="eyebrow">RECORDED WORKOUT / COACH REVIEW</p><h3>Ride at a glance</h3><p>Clear measurements first, with a short AI interpretation when you ask for it.</p></div><button type="button" class="primary" data-ai-activity>${analysis.aiReport ? 'Refresh AI notes' : 'Generate AI notes'}</button></div>${aiReviewMeasurements(d)}<div class="ai-review-notes-head"><h3>Coach notes</h3><span>Generated on demand · Athlete sharing permission required</span></div><div id="activity-ai-result" aria-live="polite">${aiReportMarkup()}</div></section></section></div></div>`;
   setActivityPanel(analysis.activityPanel);
 }
 // Centered, time-based average of the displayed points. The preview inserts nulls at

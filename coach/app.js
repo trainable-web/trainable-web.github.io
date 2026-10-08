@@ -149,6 +149,7 @@ async function loadWorkspace() {
   if (route[0] === 'week' && wanted === state.athleteId) openWeek();
   if (route[0] === 'note' && wanted === state.athleteId) openNote();
   if (route[0] === 'activity' && wanted === state.athleteId && route[2]) openActivity(route[2]);
+  refreshAttentionBadge();
 }
 function setWorkspaceView(view) {
   $('#workspace').dataset.view = view;
@@ -235,21 +236,62 @@ async function showAttention() {
     $('#attention-list').innerHTML = `<div class="attention-empty"><strong>Could not load attention</strong><p>${safe(error.message)}</p><button type="button" class="secondary" data-attention-retry>Try again</button></div>`;
   }
 }
+async function refreshAttentionBadge() {
+  if ($('#workspace').hidden || document.hidden) return;
+  try {
+    state.attention = await portal('attention', { client_date: localDate() });
+    const count = state.attention.items.filter((item) => !item.reviewed_at && item.priority === 'review').length;
+    const badge = $('#attention-badge');
+    badge.hidden = count === 0; badge.textContent = String(count);
+    $('#show-attention').setAttribute('aria-label', count ? `Needs attention, ${count} reviews` : 'Needs attention');
+    if ($('#workspace').dataset.view === 'attention') renderAttention();
+  } catch { /* The review queue remains available through its normal refresh action. */ }
+}
 function showAthletes(updateRoute = true, loadSelection = true) {
   setWorkspaceView('athletes');
   if (updateRoute) { state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); }
   if (updateRoute && (location.hash === '#attention' || location.hash === '#devices')) history.pushState(null, '', '#team');
   if (loadSelection && !state.athlete && state.roster.length) selectAthlete(state.roster[0].id, { updateRoute: false });
 }
+function rideDecisionMarkup(item) {
+  const review = item.ride_review;
+  if (!review) return '';
+  const ride = review.ride;
+  const facts = [
+    ride?.duration_s > 0 ? elapsedLabel(ride.duration_s) : null,
+    ride?.distance_m > 0 ? numberLabel(ride.distance_m / 1000, ' km', 1) : null,
+    ride?.avg_power > 0 ? numberLabel(ride.avg_power, ' W') + ' average' : null,
+    ride?.avg_hr > 0 ? numberLabel(ride.avg_hr, ' bpm') + ' average' : null,
+  ].filter(Boolean);
+  const plan = review.planned
+    ? `${review.planned.linked ? 'Linked plan' : 'Possible same-day plan'}: ${review.planned.headline || 'Workout'} · ${minutesLabel(review.planned.duration_min)}`
+    : 'No planned workout linked to this ride';
+  const upcoming = review.next_sessions?.length
+    ? review.next_sessions.map((session) => `<li><strong>${safe(DAYS[session.day_of_week])}</strong> ${safe(session.headline || 'Workout')} · ${safe(minutesLabel(session.duration_min))}</li>`).join('')
+    : '<li>No remaining saved workouts this week.</li>';
+  const proposal = review.proposed_template && !item.reviewed_at
+    ? `<div class="ride-decision-proposal"><strong>Suggested change for ${safe(DAYS[review.target_day_of_week])}</strong><p>${review.replaced ? `${safe(review.replaced.headline || 'Planned workout')} (${safe(minutesLabel(review.replaced.target_duration_min))}) → ` : 'Add '}<strong>${safe(review.proposed_template.headline)}</strong> (${safe(minutesLabel(review.proposed_template.duration_min))})</p><small>${safe(review.proposed_template.why_line)}</small><details><summary>See workout blocks</summary><ol>${(review.proposed_template.blocks || []).map((block) => `<li>${safe(minutesLabel(block.duration_min))} ${safe(ZONES.find(([key]) => key === block.zone)?.[1] || title(block.zone))}</li>`).join('')}</ol></details><button type="button" class="primary small-button" data-attention-approve="${safe(item.id)}">Approve this workout</button></div>`
+    : '';
+  return `<div class="ride-decision"><div class="ride-decision-facts">${facts.map((fact) => `<span>${safe(fact)}</span>`).join('') || '<span>Ride data is limited</span>'}</div><p class="ride-decision-plan">${safe(plan)}</p><p class="ride-decision-next">Next on the calendar</p><ul>${upcoming}</ul>${proposal}</div>`;
+}
+function attentionDecisionLabel(item) {
+  return { keep_plan: 'Kept current plan', approved_library: 'Approved library workout',
+    custom_workout: 'Changed workout' }[item.decision] || 'Reviewed';
+}
 function renderAttention() {
   const data = state.attention; if (!data) return;
   const open = data.items.filter((item) => !item.reviewed_at);
   const review = open.filter((item) => item.priority === 'review');
+  const badge = $('#attention-badge'); badge.hidden = review.length === 0; badge.textContent = String(review.length);
+  $('#show-attention').setAttribute('aria-label', review.length ? `Needs attention, ${review.length} reviews` : 'Needs attention');
   const planning = open.filter((item) => item.priority === 'planning');
   const gaps = open.filter((item) => item.priority === 'data');
   $('#attention-summary').innerHTML = `<div><strong>${data.athlete_count}</strong><span>${data.athlete_count === 1 ? 'athlete' : 'athletes'} accessible</span></div><div><strong>${review.length}</strong><span>rides and check-ins to review</span></div><div><strong>${planning.length}</strong><span>plans to prepare</span></div><div><strong>${gaps.length}</strong><span>data gaps</span></div>`;
-  $('#attention-coverage').hidden = !data.activity_coverage_limited;
-  $('#attention-coverage').textContent = data.activity_coverage_limited ? 'Activity volume exceeded this quick review. Data-gap alerts were suppressed; open an athlete for a closer look.' : '';
+  $('#attention-coverage').hidden = !data.activity_coverage_limited && !data.ride_review_coverage_limited;
+  $('#attention-coverage').textContent = [
+    data.ride_review_coverage_limited ? 'Showing the first 200 ride reviews, with undecided rides first. More will appear as you clear these.' : '',
+    data.activity_coverage_limited ? 'Activity volume exceeded this quick review. Data-gap alerts were suppressed; open an athlete for a closer look.' : '',
+  ].filter(Boolean).join(' ');
   const filter = state.attentionFilter;
   document.querySelectorAll('[data-attention-filter]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.attentionFilter === filter)));
   const shown = data.items.filter((item) => filter === 'all' || (filter === 'reviewed' ? item.reviewed_at : !item.reviewed_at));
@@ -259,7 +301,7 @@ function renderAttention() {
     $('#attention-list').innerHTML = `<div class="attention-empty"><strong>${headline}</strong><p>${detail}</p><button type="button" class="secondary" data-attention-athletes>Review athletes</button></div>`;
     return;
   }
-  $('#attention-list').innerHTML = shown.map((item) => `<article class="attention-item ${item.reviewed_at ? 'is-reviewed' : ''}"><div class="attention-item-main"><div class="attention-item-top"><span class="attention-type ${safe(item.priority)}">${safe(item.category === 'ride' ? 'Ride review' : item.priority === 'review' ? 'Check-in' : item.priority === 'planning' ? 'Planning' : 'Data gap')}</span><span class="attention-date">${safe(dateLabel(item.observed_at))}</span></div><h3>${safe(item.athlete_name)} · ${safe(item.headline)}</h3>${item.ride_review?.summary ? `<p><strong>${safe(item.ride_review.summary)}</strong></p>` : ''}<p>${safe(item.explanation)}</p>${item.ride_review?.recommendation === 'new_workout' ? '<p class="ride-review-recommendation">Possible plan change · coach approval required</p>' : item.ride_review ? '<p class="ride-review-recommendation">The saved plan stays in place unless you change it.</p>' : ''}<details><summary>View evidence</summary><ul>${item.evidence.map((line) => `<li>${safe(line)}</li>`).join('')}</ul><small>${item.evidence_kind === 'athlete_reported' ? 'Athlete-reported' : 'Observed'} · ${item.data_quality === 'limited' ? 'Limited data' : 'Direct evidence'}</small></details></div><div class="attention-actions"><button type="button" class="primary small-button" data-attention-athlete="${safe(item.athlete_id)}" data-attention-plan="${item.priority === 'planning'}" ${item.ride_review ? `data-attention-ride="${safe(item.ride_review.activity_id)}"` : ''}>${safe(item.next_action)}</button>${item.ride_review && !item.reviewed_at ? `${item.ride_review.template_id ? `<button type="button" class="secondary small-button" data-attention-template="${safe(item.id)}">Review proposed workout</button>` : ''}<button type="button" class="secondary small-button" data-attention-ask="${safe(item.id)}">Ask for new workout</button>` : ''}${item.reviewed_at ? '<span class="attention-reviewed">Reviewed</span>' : `<button type="button" class="quiet small-button" data-attention-review="${safe(item.id)}">${item.ride_review ? 'Keep plan · done' : 'Mark reviewed'}</button>`}</div></article>`).join('');
+  $('#attention-list').innerHTML = shown.map((item) => `<article class="attention-item ${item.reviewed_at ? 'is-reviewed' : ''}"><div class="attention-item-main"><div class="attention-item-top"><span class="attention-type ${safe(item.priority)}">${safe(item.category === 'ride' ? 'Ride review' : item.priority === 'review' ? 'Check-in' : item.priority === 'planning' ? 'Planning' : 'Data gap')}</span><span class="attention-date">${safe(dateLabel(item.observed_at))}</span></div><h3>${safe(item.athlete_name)} · ${safe(item.headline)}</h3>${item.ride_review?.summary ? `<p><strong>${safe(item.ride_review.summary)}</strong></p>` : ''}<p>${safe(item.explanation)}</p>${rideDecisionMarkup(item)}${item.evidence?.length ? `<details><summary>Recorded evidence</summary><ul>${item.evidence.map((line) => `<li>${safe(line)}</li>`).join('')}</ul><small>${item.evidence_kind === 'athlete_reported' ? 'Athlete-reported' : 'Observed'} · ${item.data_quality === 'limited' ? 'Limited data' : 'Direct evidence'}</small></details>` : ''}</div><div class="attention-actions"><button type="button" class="secondary small-button" data-attention-athlete="${safe(item.athlete_id)}" data-attention-plan="${item.priority === 'planning'}" ${item.ride_review ? `data-attention-ride="${safe(item.ride_review.activity_id)}"` : ''}>${safe(item.ride_review ? 'View ride charts' : item.next_action)}</button>${item.ride_review && !item.reviewed_at ? `<button type="button" class="secondary small-button" data-attention-ask="${safe(item.id)}">Choose another workout</button>` : ''}${item.reviewed_at ? `<span class="attention-reviewed">${safe(attentionDecisionLabel(item))}</span>` : `<button type="button" class="quiet small-button" data-attention-review="${safe(item.id)}">${item.ride_review ? 'Keep current plan' : 'Mark reviewed'}</button>`}</div></article>`).join('');
 }
 function renderRoster() {
   const query = $('#roster-query').value.trim().toLocaleLowerCase();
@@ -354,18 +396,25 @@ async function saveAthleteSettings() {
   const training_context = {
     block_start_date: value('block_start_date') || null, block_end_date: value('block_end_date') || null,
     block_length_weeks: optional('block_length_weeks'), recovery_week_start_date: value('recovery_week_start_date') || null,
-    target_weekly_hours: optional('target_weekly_hours'), training_days_per_week: optional('training_days_per_week'),
+    min_weekly_hours: optional('min_weekly_hours'), max_weekly_hours: optional('max_weekly_hours'),
+    training_days_per_week: optional('training_days_per_week'),
     training_cycle_days: optional('training_cycle_days'), block_focus: value('block_focus'),
     repeat_workouts_ok: checked('repeat_workouts_ok'),
   };
   const button = form.querySelector('[data-action="save-athlete-settings"]');
+  if (training_context.min_weekly_hours != null && training_context.max_weekly_hours != null
+    && Number(training_context.min_weekly_hours) > Number(training_context.max_weekly_hours)) {
+    setStatus('Minimum weekly hours must be no more than maximum weekly hours.', true, '#athlete-settings-status');
+    return;
+  }
   button.disabled = true;
   setStatus('Saving athlete settings…', false, '#athlete-settings-status');
   try {
-    const { settings } = await portal('save_athlete_settings', { athlete_id: state.athleteId, profile, zones, training_context });
+    const { settings, change } = await portal('save_athlete_settings', { athlete_id: state.athleteId, profile, zones, training_context });
     state.athlete.profile = settings.profile;
     state.athlete.zones = settings.zones;
     state.athlete.training_context = settings.training_context;
+    if (change) state.athlete.profile_changes = [change, ...(state.athlete.profile_changes || [])].slice(0, 8);
     renderAthlete();
     setStatus('Athlete settings saved. Future workout targets use these values.', false, '#athlete-settings-status');
     $('[data-action="save-athlete-settings"]')?.focus();
@@ -655,9 +704,12 @@ async function saveWorkout() {
   $('#builder-error').textContent = 'Saving the workout…';
   try {
     const result = await portal('save_workout', { athlete_id: state.athleteId, client_date: localDate(), week_start_date: b.week_start_date || currentWeek(), day_of_week: b.day_of_week,
+      review_activity_id: b.review_activity_id,
       headline: b.headline, description: b.description, why_line: b.why_line, workout_type: b.workout_type, intent: b.intent, blocks: b.blocks });
     closeDrawer(true); state.calendarWeek = b.week_start_date || currentWeek(); state.athleteSection = 'calendar'; await selectAthlete(state.athleteId);
-    setStatus(result.safety_adjusted ? 'Workout saved. Trainable shortened it to the athlete’s safety limit; review the updated duration.' : 'Workout saved to the athlete’s live week.');
+    setStatus(result.safety_adjusted ? 'Workout saved. Trainable shortened it to the athlete’s safety limit; review the updated duration.' : b.review_activity_id
+      ? result.review_cleared === false ? 'Workout saved. Refresh the review queue to clear the ride alert.' : 'Workout saved to the athlete’s live week. The ride alert is closed.'
+      : 'Workout saved to the athlete’s live week.');
   } catch (error) { $('#builder-error').textContent = error.message; }
 }
 async function reviewWeek() {
@@ -717,17 +769,31 @@ function updateWeekTotal() {
   const limit = Math.round(state.weekDraft.evidence.baseline_cap_min * 1.2);
   $('#week-total').textContent = trainingMinutesLabel(total);
   $('#week-load-warning').hidden = total <= limit;
+  const bounds = state.weekDraft.evidence.weekly_hours;
+  const rangeStatus = $('#week-hours-range');
+  if (rangeStatus && bounds) {
+    const below = bounds.minimum != null && total < Math.round(bounds.minimum * 60);
+    const above = bounds.maximum != null && total > Math.round(bounds.maximum * 60);
+    rangeStatus.textContent = below ? `Below the coach’s ${bounds.minimum} h minimum`
+      : above ? `Above the coach’s ${bounds.maximum} h maximum` : 'Within the coach’s weekly hours';
+    rangeStatus.classList.toggle('is-error', below || above);
+  }
 }
 function renderWeekEditor() {
   const d = state.weekDraft;
   const selected = d?.week_start_date || state.weekSelection || currentWeek();
   const storedPlan = state.athlete?.plans?.find((p) => p.week_start_date === selected);
   const hasStoredDays = state.athlete?.workouts?.some((w) => w.plan_id === storedPlan?.id);
+  const hours = d?.evidence?.weekly_hours;
+  const coachHours = state.athlete?.training_context;
+  const minimum = hours?.minimum ?? coachHours?.min_weekly_hours;
+  const maximum = hours?.maximum ?? coachHours?.max_weekly_hours ?? coachHours?.target_weekly_hours;
+  const hourRange = minimum == null && maximum == null ? '' : `<div class="week-hours-guidance"><strong>Coach’s weekly hours</strong><span>${minimum == null ? 'No minimum' : `${safe(minimum)} h minimum`} · ${maximum == null ? 'No maximum' : `${safe(maximum)} h maximum`}</span>${d ? '<small id="week-hours-range" role="status"></small>' : ''}</div>`;
   const selector = `<div class="form-group"><label for="week-start">Planning week</label><select id="week-start"><option value="${currentWeek()}" ${selected === currentWeek() ? 'selected' : ''}>This week · ${safe(dateLabel(currentWeek()))}</option><option value="${nextWeek()}" ${selected === nextWeek() ? 'selected' : ''}>Next week · ${safe(dateLabel(nextWeek()))}</option></select></div>`;
   const focus = `<div class="form-group"><label for="week-focus">Coach focus, optional</label><textarea id="week-focus" rows="2" maxlength="500" placeholder="Build aerobic base, with one sprint session">${safe(d?.focus || '')}</textarea><p class="helper">A short direction for the assistant. You can change every draft day before publishing.</p></div>`;
   const content = d ? `<div class="callout"><strong>Training load draft</strong><p>${safe(d.summary || 'A balanced starting point for coach review.')}</p><small>Recent cycling average: ${safe(trainingMinutesLabel(d.evidence.recent_average_min))} per week · Draft ceiling: ${safe(trainingMinutesLabel(d.evidence.baseline_cap_min))} · Single-session evidence limit: ${safe(trainingMinutesLabel(d.evidence.session_cap_min))}. ${d.notes_considered ? `${d.notes_considered} athlete note${d.notes_considered === 1 ? '' : 's'} considered.` : 'No athlete notes yet.'}${d.evidence.sessions < 2 ? ' Recent riding is limited, so review the starting load closely.' : ''}</small></div><div class="week-edit-list">${d.days.map(weekDayMarkup).join('')}</div><div class="week-review"><div><span>Reviewed week</span><strong id="week-total"></strong></div><p>AI prepared the baseline. You decide whether to publish it; fixed days stay in place.</p><div id="week-load-warning" class="callout warning" hidden><label class="acknowledge"><input id="week-acknowledge" type="checkbox"> I reviewed the added load above the recent training or coach target.</label></div><p id="week-error" class="form-error" role="alert"></p><button type="button" class="primary" data-publish-week>Publish reviewed week</button><div class="week-review-actions"><button type="button" class="quiet" data-generate-week>Refresh week</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>` : `<div class="list-empty"><strong>Build the training week</strong><p>The assistant drafts the whole week using recent training, coach targets, recovery, goals and athlete notes. Completed work and races stay fixed.</p><div class="week-review-actions"><button type="button" class="primary" data-generate-week>Generate draft week</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>`;
 
-  openEditor('week', 'WEEK BUILDER', 'Build the full week', `<p>Build the training week from the available evidence and coach direction, then review every day.</p>${selector}${focus}<p id="week-status" class="status" role="status"></p>${content}`);
+  openEditor('week', 'WEEK BUILDER', 'Build the full week', `<p>Build the training week from the available evidence and coach direction, then review every day.</p>${selector}${hourRange}${focus}<p id="week-status" class="status" role="status"></p>${content}`);
   if (d) updateWeekTotal();
 }
 function openWeek(weekStart = currentWeek()) { state.weekDraft = null; state.weekSelection = weekStart; state.editorDirty = false; renderWeekEditor(); }
@@ -818,6 +884,12 @@ async function publishWeek() {
     field?.setAttribute('aria-invalid', 'true'); field?.focus(); return;
   }
   const total = draft.days.reduce((n, d) => n + weekMinutes(d), 0);
+  const bounds = draft.evidence.weekly_hours;
+  if (bounds?.minimum != null && total < Math.round(bounds.minimum * 60)
+    || bounds?.maximum != null && total > Math.round(bounds.maximum * 60)) {
+    $('#week-error').textContent = `Keep the reviewed week within ${bounds.minimum ?? 0}–${bounds.maximum ?? 'unlimited'} hours. Adjust the workouts or change the coach’s weekly range.`;
+    return;
+  }
   const acknowledge_load = total <= draft.evidence.baseline_cap_min * 1.2 || $('#week-acknowledge')?.checked === true;
   if (!acknowledge_load) { $('#week-error').textContent = 'Review the added load and tick the confirmation before publishing.'; $('#week-acknowledge').focus(); return; }
   state.weekPublishing = true;
@@ -1019,6 +1091,24 @@ $('.attention-filters').addEventListener('click', (event) => {
 $('#attention-list').addEventListener('click', async (event) => {
   if (event.target.closest('[data-attention-retry]')) { await showAttention(); return; }
   if (event.target.closest('[data-attention-athletes]')) { showAthletes(); return; }
+  const approve = event.target.closest('[data-attention-approve]');
+  if (approve) {
+    const item = state.attention.items.find((row) => row.id === approve.dataset.attentionApprove);
+    const proposal = item?.ride_review?.proposed_template;
+    if (!proposal || item.reviewed_at) return;
+    approve.disabled = true;
+    try {
+      const result = await portal('save_workout', { athlete_id: item.athlete_id, client_date: localDate(),
+        week_start_date: item.ride_review.week_start_date, day_of_week: item.ride_review.target_day_of_week,
+        review_activity_id: item.ride_review.activity_id, review_template_id: proposal.id });
+      if (result.review_cleared) { item.reviewed_at = new Date().toISOString(); item.decision = 'approved_library'; }
+      renderAttention();
+      setStatus(result.safety_adjusted ? 'Workout approved and saved, but shortened to the athlete’s safety limit. Open the calendar to review it.'
+        : result.review_cleared ? 'Workout approved and saved to the athlete’s calendar. The ride alert is closed.'
+          : 'Workout saved. Refresh the queue to clear this ride alert.');
+    } catch (error) { approve.disabled = false; setStatus(error.message, true); }
+    return;
+  }
   const proposed = event.target.closest('[data-attention-template]');
   if (proposed) {
     const item = state.attention.items.find((row) => row.id === proposed.dataset.attentionTemplate);
@@ -1028,6 +1118,7 @@ $('#attention-list').addEventListener('click', async (event) => {
     const proposedWeek = item.ride_review.week_start_date;
     useTemplate(item.ride_review.template_id, Number(item.ride_review.target_day_of_week),
       proposedWeek === currentWeek() || proposedWeek === nextWeek() ? proposedWeek : nextWeek());
+    if (state.builder) state.builder.review_activity_id = item.ride_review.activity_id;
     return;
   }
   const ask = event.target.closest('[data-attention-ask]');
@@ -1037,6 +1128,7 @@ $('#attention-list').addEventListener('click', async (event) => {
     showAthletes(false, false);
     await selectAthlete(item.athlete_id, { openDetail: true, pushRoute: true });
     askForNewWorkout(`${item.ride_review?.summary || ''} ${item.ride_review?.finding || ''}`);
+    if (state.builder) state.builder.review_activity_id = item.ride_review.activity_id;
     return;
   }
   const review = event.target.closest('[data-attention-review]');
@@ -1045,7 +1137,7 @@ $('#attention-list').addEventListener('click', async (event) => {
     try {
       await portal('review_attention', { item_id: review.dataset.attentionReview, client_date: localDate() });
       const item = state.attention.items.find((row) => row.id === review.dataset.attentionReview);
-      if (item) item.reviewed_at = new Date().toISOString();
+      if (item) { item.reviewed_at = new Date().toISOString(); item.decision = item.ride_review ? 'keep_plan' : 'reviewed'; }
       renderAttention();
       ($('#attention-list [data-attention-review]') || $('#attention-list [data-attention-athlete]') || $('[data-attention-filter="reviewed"]')).focus();
     } catch (error) { review.disabled = false; setStatus(error.message, true); }
@@ -1312,6 +1404,8 @@ async function start() {
   showAuth('');
 }
 start();
+setInterval(refreshAttentionBadge, 180000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshAttentionBadge(); });
 
 $('#drawer-body').addEventListener('click', (event) => { const mode = event.target.closest('[data-builder-mode]'); if (mode && state.builder) { captureBuilder(); state.builder.assistant_mode = mode.dataset.builderMode === 'ai'; renderBuilder(); } });
 
