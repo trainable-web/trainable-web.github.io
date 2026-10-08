@@ -745,14 +745,14 @@ function askForNewWorkout(context = '') {
   $('#draft-status').textContent = day == null ? 'This week has no editable day. Drafting for next week; review the day before saving.' : 'Review the request, then draft a workout. Nothing has changed on the calendar.';
 }
 function nextWeek() { const d = new Date(currentWeek() + 'T12:00:00'); d.setDate(d.getDate() + 7); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); }
-function weekMinutes(day) { return day.locked ? (day.existing || []).reduce((n, w) => n + (Number(w.target_duration_min) || 0), 0)
+function weekMinutes(day) { return day.locked ? (Number(day.projected_minutes) || 0)
   : day.rest ? 0 : (day.blocks || []).reduce((n, b) => n + (Number(b.duration_min) || 0), 0); }
 function weekBlocksMarkup(day) {
   return (day.blocks || []).map((b, i) => `<div class="block-row" data-week-block="${i}"><div><label for="week-type-${day.day_of_week}-${i}">Block</label><select id="week-type-${day.day_of_week}-${i}" data-week-block-field="type">${optionMarkup(TYPES, b.type)}</select></div><div><label for="week-zone-${day.day_of_week}-${i}">Zone</label><select id="week-zone-${day.day_of_week}-${i}" data-week-block-field="zone">${optionMarkup(ZONES, b.zone)}</select></div><div><label for="week-duration-${day.day_of_week}-${i}">Minutes</label><input id="week-duration-${day.day_of_week}-${i}" data-week-block-field="duration_min" type="number" min="1" max="180" value="${safe(b.duration_min)}"></div><div class="move-controls"><button type="button" class="icon-button" data-week-move="${day.day_of_week}:${i}:-1" aria-label="Move block ${i + 1} up">↑</button><button type="button" class="icon-button" data-week-move="${day.day_of_week}:${i}:1" aria-label="Move block ${i + 1} down">↓</button><button type="button" class="icon-button" data-week-remove="${day.day_of_week}:${i}" aria-label="Remove block ${i + 1}">×</button></div></div>`).join('');
 }
 function weekDayMarkup(day) {
   const label = DAYS[day.day_of_week];
-  if (day.locked) return `<article class="week-edit-day locked"><div class="week-edit-heading"><strong>${label}</strong><span>Preserved · ${safe(minutesLabel(weekMinutes(day)))}</span></div><p>${safe((day.existing || []).map((w) => w.headline || title(w.workout_type)).join(' + ') || 'Past day')}</p><small>Completed sessions, races and existing coach sessions stay in place.</small></article>`;
+  if (day.locked) return `<article class="week-edit-day locked"><div class="week-edit-heading"><strong>${label}</strong><span>${day.recorded_minutes ? 'Recorded' : 'Preserved'} · ${safe(minutesLabel(weekMinutes(day)))}</span></div><p>${safe((day.existing || []).map((w) => w.headline || title(w.workout_type)).join(' + ') || (day.recorded_minutes ? 'Completed riding' : 'Past day'))}</p><small>Recorded rides, completed sessions, races and existing coach sessions stay in place.</small></article>`;
   return `<article class="week-edit-day" data-week-day="${day.day_of_week}"><div class="week-edit-heading"><strong>${label}</strong><span>${safe(minutesLabel(weekMinutes(day)))}</span></div><div class="week-day-choice"><label for="week-mode-${day.day_of_week}">Plan for ${label}</label><select id="week-mode-${day.day_of_week}" data-week-field="mode"><option value="ride" ${day.rest ? '' : 'selected'}>Workout</option><option value="rest" ${day.rest ? 'selected' : ''}>Rest day</option></select></div>${day.rest ? `<p class="helper">Recovery is part of the plan. Change to Workout if needed.</p>` : `<details><summary>${safe(day.headline || 'Edit workout')} · Edit details and blocks</summary><div class="week-day-details"><div class="form-group"><label for="week-headline-${day.day_of_week}">Workout title</label><input id="week-headline-${day.day_of_week}" data-week-field="headline" maxlength="60" value="${safe(day.headline)}"></div><div class="form-group"><label for="week-description-${day.day_of_week}">Athlete instructions</label><textarea id="week-description-${day.day_of_week}" data-week-field="description" rows="3">${safe(day.description)}</textarea></div><div class="form-group"><label for="week-why-${day.day_of_week}">Why this session</label><textarea id="week-why-${day.day_of_week}" data-week-field="why_line" rows="2">${safe(day.why_line)}</textarea></div><div class="block-list">${weekBlocksMarkup(day)}</div><button type="button" class="secondary small-button" data-week-add="${day.day_of_week}">Add block</button></div></details>`}</article>`;
 }
 function captureWeekEditor() {
@@ -776,17 +776,18 @@ function captureWeekEditor() {
 function updateWeekTotal() {
   if (!state.weekDraft) return;
   const total = state.weekDraft.days.reduce((n, d) => n + weekMinutes(d), 0);
-  const limit = Math.round(state.weekDraft.evidence.baseline_cap_min * 1.2);
+  const limit = Math.round((state.weekDraft.evidence.draft_ceiling_min ?? state.weekDraft.evidence.baseline_cap_min) * 1.2);
   $('#week-total').textContent = trainingMinutesLabel(total);
-  $('#week-load-warning').hidden = total <= limit;
+  const alreadyRecorded = state.weekDraft.evidence.weekly_hours?.recorded_minutes || 0;
+  $('#week-load-warning').hidden = total <= Math.max(limit, alreadyRecorded);
   const bounds = state.weekDraft.evidence.weekly_hours;
   const rangeStatus = $('#week-hours-range');
   if (rangeStatus && bounds) {
     const below = bounds.minimum != null && total < Math.round(bounds.minimum * 60);
     const above = bounds.maximum != null && total > Math.round(bounds.maximum * 60);
-    rangeStatus.textContent = below ? `Below the coach’s ${bounds.minimum} h minimum`
+    rangeStatus.textContent = below ? `Below the coach’s preferred ${bounds.minimum} h; you can still publish this evidence-guided draft`
       : above ? `Above the coach’s ${bounds.maximum} h maximum` : 'Within the coach’s weekly hours';
-    rangeStatus.classList.toggle('is-error', below || above);
+    rangeStatus.classList.toggle('is-error', above);
   }
 }
 function renderWeekEditor() {
@@ -798,10 +799,13 @@ function renderWeekEditor() {
   const coachHours = state.athlete?.training_context;
   const minimum = hours?.minimum ?? coachHours?.min_weekly_hours;
   const maximum = hours?.maximum ?? coachHours?.max_weekly_hours ?? coachHours?.target_weekly_hours;
-  const hourRange = minimum == null && maximum == null ? '' : `<div class="week-hours-guidance"><strong>Coach’s weekly hours</strong><span>${minimum == null ? 'No minimum' : `${safe(minimum)} h minimum`} · ${maximum == null ? 'No maximum' : `${safe(maximum)} h maximum`}</span>${d ? '<small id="week-hours-range" role="status"></small>' : ''}</div>`;
+  const hourRange = minimum == null && maximum == null ? '' : `<div class="week-hours-guidance"><strong>Coach’s weekly hours</strong><span>${minimum == null ? 'No preferred minimum' : `${safe(minimum)} h preferred minimum`} · ${maximum == null ? 'No maximum' : `${safe(maximum)} h maximum`}</span>${d ? '<small id="week-hours-range" role="status"></small>' : ''}</div>`;
   const selector = `<div class="form-group"><label for="week-start">Planning week</label><select id="week-start"><option value="${currentWeek()}" ${selected === currentWeek() ? 'selected' : ''}>This week · ${safe(dateLabel(currentWeek()))}</option><option value="${nextWeek()}" ${selected === nextWeek() ? 'selected' : ''}>Next week · ${safe(dateLabel(nextWeek()))}</option></select></div>`;
   const focus = `<div class="form-group"><label for="week-focus">Coach focus, optional</label><textarea id="week-focus" rows="2" maxlength="500" placeholder="Build aerobic base, with one sprint session">${safe(d?.focus || '')}</textarea><p class="helper">A short direction for the assistant. You can change every draft day before publishing.</p></div>`;
-  const content = d ? `<div class="callout"><strong>Training load draft</strong><p>${safe(d.summary || 'A balanced starting point for coach review.')}</p><small>Recent cycling average: ${safe(trainingMinutesLabel(d.evidence.recent_average_min))} per week · Draft ceiling: ${safe(trainingMinutesLabel(d.evidence.baseline_cap_min))} · Single-session evidence limit: ${safe(trainingMinutesLabel(d.evidence.session_cap_min))}. ${d.notes_considered ? `${d.notes_considered} athlete note${d.notes_considered === 1 ? '' : 's'} considered.` : 'No athlete notes yet.'}${d.evidence.sessions < 2 ? ' Recent riding is limited, so review the starting load closely.' : ''}</small></div><div class="week-edit-list">${d.days.map(weekDayMarkup).join('')}</div><div class="week-review"><div><span>Reviewed week</span><strong id="week-total"></strong></div><p>AI prepared the baseline. You decide whether to publish it; fixed days stay in place.</p><div id="week-load-warning" class="callout warning" hidden><label class="acknowledge"><input id="week-acknowledge" type="checkbox"> I reviewed the added load above the recent training or coach target.</label></div><p id="week-error" class="form-error" role="alert"></p><button type="button" class="primary" data-publish-week>Publish reviewed week</button><div class="week-review-actions"><button type="button" class="quiet" data-generate-week>Refresh week</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>` : `<div class="list-empty"><strong>Build the training week</strong><p>The assistant drafts the whole week using recent training, coach targets, recovery, goals and athlete notes. Eight AI week drafts are available per rolling 24 hours. You can still use the workout library at any time.</p><div class="week-review-actions"><button type="button" class="primary" data-generate-week>Generate draft week</button><button type="button" class="secondary" data-open-workout-library>Use workout library</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>`;
+  const block = d?.evidence?.block_timing;
+  const blockText = block?.recovery_week ? 'Recovery week: the draft reduces load.'
+    : block?.loading_week ? `Loading week ${block.block_week_number || ''}${block.next_week_recovery ? ' · recovery planned next week' : ''}.` : '';
+  const content = d ? `<div class="callout"><strong>Training load draft</strong><p>${safe(d.summary || 'A balanced starting point for coach review.')}</p><small>${safe(blockText)} Recent cycling average: ${safe(trainingMinutesLabel(d.evidence.recent_average_min))} per week · Evidence-guided draft ceiling: ${safe(trainingMinutesLabel(d.evidence.draft_ceiling_min ?? d.evidence.baseline_cap_min))} · Single-session limit: ${safe(trainingMinutesLabel(d.evidence.session_cap_min))}. ${d.notes_considered ? `${d.notes_considered} athlete note${d.notes_considered === 1 ? '' : 's'} considered.` : 'No athlete notes yet.'}${d.evidence.sessions < 2 ? ' Recent riding is limited, so review the starting load closely.' : ''}</small></div><div class="week-edit-list">${d.days.map(weekDayMarkup).join('')}</div><div class="week-review"><div><span>Projected training, including recorded rides</span><strong id="week-total"></strong></div><p>AI prepared the draft. You decide whether to publish it; recorded and fixed days stay in place.</p><div id="week-load-warning" class="callout warning" hidden><label class="acknowledge"><input id="week-acknowledge" type="checkbox"> I reviewed the added load above recent training.</label></div><p id="week-error" class="form-error" role="alert"></p><button type="button" class="primary" data-publish-week>Publish reviewed week</button><div class="week-review-actions"><button type="button" class="quiet" data-generate-week>Refresh week</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>` : `<div class="list-empty"><strong>Build the training week</strong><p>The assistant drafts the whole week using recorded rides, recent training, coach preferences, block timing, recovery, goals and athlete notes. Eight AI week drafts are available per rolling 24 hours. You can still use the workout library at any time.</p><div class="week-review-actions"><button type="button" class="primary" data-generate-week>Generate draft week</button><button type="button" class="secondary" data-open-workout-library>Use workout library</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>`;
 
   openEditor('week', 'WEEK BUILDER', 'Build the full week', `<p>Build the training week from the available evidence and coach direction, then review every day.</p>${selector}${hourRange}${focus}<p id="week-status" class="status" role="status"></p>${content}`);
   if (d) updateWeekTotal();
@@ -896,12 +900,13 @@ async function publishWeek() {
   }
   const total = draft.days.reduce((n, d) => n + weekMinutes(d), 0);
   const bounds = draft.evidence.weekly_hours;
-  if (bounds?.minimum != null && total < Math.round(bounds.minimum * 60)
-    || bounds?.maximum != null && total > Math.round(bounds.maximum * 60)) {
-    $('#week-error').textContent = `Keep the reviewed week within ${bounds.minimum ?? 0}–${bounds.maximum ?? 'unlimited'} hours. Adjust the workouts or change the coach’s weekly range.`;
+  if (bounds?.maximum != null && total > Math.round(bounds.maximum * 60)) {
+    $('#week-error').textContent = `Keep the projected week within the coach’s ${bounds.maximum} h maximum. Shorten a workout or change the limit.`;
     return;
   }
-  const acknowledge_load = total <= draft.evidence.baseline_cap_min * 1.2 || $('#week-acknowledge')?.checked === true;
+  const alreadyRecorded = bounds?.recorded_minutes || 0;
+  const acknowledge_load = total <= Math.max((draft.evidence.draft_ceiling_min ?? draft.evidence.baseline_cap_min) * 1.2, alreadyRecorded)
+    || $('#week-acknowledge')?.checked === true;
   if (!acknowledge_load) { $('#week-error').textContent = 'Review the added load and tick the confirmation before publishing.'; $('#week-acknowledge').focus(); return; }
   state.weekPublishing = true;
   const button = $('[data-publish-week]'); if (button) button.disabled = true;
