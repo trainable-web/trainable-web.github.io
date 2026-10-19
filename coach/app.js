@@ -21,6 +21,37 @@ const minutesLabel = (n) => n ? (n >= 60 ? Math.floor(n / 60) + 'h ' + (n % 60 ?
 const trainingMinutesLabel = (n) => n ? minutesLabel(n) : '0m';
 const localDate = () => { const d = new Date(); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); };
 const currentWeek = () => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'), String(d.getDate()).padStart(2, '0')].join('-'); };
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+let viewVisit = 0;
+let lastMotionKey = '';
+function animateCount(root) {
+  if (reduceMotion.matches) return;
+  root.querySelectorAll('[data-count]').forEach((node) => {
+    const target = Number(node.dataset.count);
+    if (!Number.isFinite(target) || target === 0) return;
+    const start = performance.now(), original = node.textContent;
+    const tick = (now) => {
+      if (!node.isConnected) return;
+      const progress = Math.min(1, (now - start) / 300);
+      node.textContent = String(Math.round(target * (1 - (1 - progress) ** 3)));
+      if (progress < 1) requestAnimationFrame(tick);
+      else node.textContent = original;
+    };
+    requestAnimationFrame(tick);
+  });
+}
+function animateEntry(root, key) {
+  if (!root || reduceMotion.matches || lastMotionKey === key) return;
+  lastMotionKey = key;
+  root.classList.remove('view-enter');
+  void root.offsetWidth;
+  root.dataset.motionKey = key;
+  root.classList.add('view-enter');
+  animateCount(root);
+  setTimeout(() => {
+    if (root.dataset.motionKey === key) root.classList.remove('view-enter');
+  }, 360);
+}
 
 function session() {
   try { const saved = localStorage.getItem(SESSION_KEY); if (saved) return JSON.parse(saved); } catch { /* Try the prior tab session. */ }
@@ -146,7 +177,7 @@ async function loadWorkspace() {
   const route = location.hash.slice(1).split('/');
   renderRoster();
   if (route[0] === 'devices') { await showDevices(); return; }
-  if (route[0] === 'attention') { await showAttention(); return; }
+  if (route[0] === 'attention' || !route[0]) { await showAttention(); return; }
   showAthletes(false, false);
   const wanted = ['athlete', 'builder', 'meeting', 'week', 'note', 'activity'].includes(route[0]) ? route[1] : null;
   const validWanted = state.roster.some((p) => p.id === wanted) ? wanted : null;
@@ -162,15 +193,18 @@ async function loadWorkspace() {
   refreshAttentionBadge();
 }
 function setWorkspaceView(view) {
+  if ($('#workspace').dataset.view !== view) viewVisit++;
   $('#workspace').dataset.view = view;
-  $('#workspace-title').textContent = { athletes: 'Athlete workspace', attention: 'Needs attention', devices: 'Connections' }[view];
-  $('#workspace-subtitle').textContent = { athletes: 'Review training history, monitor trends, and plan the next session.', attention: 'Review check-ins, planning needs, and missing data.', devices: 'Manage the training data shared with Trainable.' }[view];
+  $('#workspace-title').textContent = { athletes: 'Athletes', attention: 'Dashboard', devices: 'Connections' }[view];
+  $('#workspace-subtitle').textContent = { athletes: 'Find an athlete, review training, and plan the next session.', attention: 'Review what needs a decision and open the next athlete.', devices: 'Manage the training data shared with Trainable.' }[view];
   $('#attention-view').hidden = view !== 'attention';
   $('#devices-view').hidden = view !== 'devices';
   $('.split-pane').hidden = view !== 'athletes';
   $('#show-attention').setAttribute('aria-current', view === 'attention' ? 'page' : 'false');
   $('#show-athletes').setAttribute('aria-current', view === 'athletes' ? 'page' : 'false');
   $('#show-devices').setAttribute('aria-current', view === 'devices' ? 'page' : 'false');
+  if (view === 'athletes') animateEntry($('.split-pane'), `athletes:${viewVisit}`);
+  if (view === 'devices') animateEntry($('#devices-view'), `devices:${viewVisit}`);
 }
 async function showDevices() {
   state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open');
@@ -253,7 +287,7 @@ async function refreshAttentionBadge() {
     const count = state.attention.items.filter((item) => !item.reviewed_at && item.priority === 'review').length;
     const badge = $('#attention-badge');
     badge.hidden = count === 0; badge.textContent = String(count);
-    $('#show-attention').setAttribute('aria-label', count ? `Needs attention, ${count} reviews` : 'Needs attention');
+    $('#show-attention').setAttribute('aria-label', count ? `Dashboard, ${count} reviews need attention` : 'Dashboard');
     if ($('#workspace').dataset.view === 'attention') renderAttention();
   } catch { /* The review queue remains available through its normal refresh action. */ }
 }
@@ -288,15 +322,28 @@ function attentionDecisionLabel(item) {
   return { keep_plan: 'Kept current plan', approved_library: 'Approved library workout',
     custom_workout: 'Changed workout' }[item.decision] || 'Reviewed';
 }
+function renderTrainingTrend(days) {
+  const node = $('#training-trend');
+  if (!Array.isArray(days) || days.length !== 14) { node.hidden = true; node.innerHTML = ''; return; }
+  const values = days.map((day) => Math.max(0, Number(day.minutes) || 0));
+  const previous = values.slice(0, 7).reduce((sum, value) => sum + value, 0);
+  const current = values.slice(7).reduce((sum, value) => sum + value, 0);
+  const max = Math.max(30, ...values);
+  const change = previous ? `${Math.round((current - previous) / previous * 100)}% vs prior 7 days` : 'Prior 7 days: no recorded training';
+  node.hidden = false;
+  node.innerHTML = `<div class="trend-copy"><div><p class="eyebrow">RECORDED TRAINING · 14 DAYS</p><h3>Training time</h3><p>Activities across connected athletes. Recorded time is separate from planned sessions.</p></div><div class="trend-total"><strong data-count="${current}">${current}</strong><span>min in the last 7 days</span><small>${safe(change)}</small></div></div><div class="trend-bars" role="img" aria-label="Recorded training minutes by day for the last 14 days"><div class="trend-grid" aria-hidden="true">${days.map((day, index) => `<span class="trend-day ${index >= 7 ? 'current' : 'previous'}" style="--bar-height:${Math.max(4, Math.round(values[index] / max * 100))}%" title="${safe(day.date)}: ${values[index]} minutes"><i></i></span>`).join('')}</div><div class="trend-axis"><span>${safe(days[0].date.slice(5))}</span><span>${safe(days[7].date.slice(5))}</span><span>${safe(days[13].date.slice(5))}</span></div></div>`;
+}
 function renderAttention() {
   const data = state.attention; if (!data) return;
   const open = data.items.filter((item) => !item.reviewed_at);
   const review = open.filter((item) => item.priority === 'review');
   const badge = $('#attention-badge'); badge.hidden = review.length === 0; badge.textContent = String(review.length);
-  $('#show-attention').setAttribute('aria-label', review.length ? `Needs attention, ${review.length} reviews` : 'Needs attention');
+  $('#show-attention').setAttribute('aria-label', review.length ? `Dashboard, ${review.length} reviews need attention` : 'Dashboard');
   const planning = open.filter((item) => item.priority === 'planning');
   const gaps = open.filter((item) => item.priority === 'data');
-  $('#attention-summary').innerHTML = `<div><strong>${data.athlete_count}</strong><span>${data.athlete_count === 1 ? 'athlete' : 'athletes'} accessible</span></div><div><strong>${review.length}</strong><span>rides and check-ins to review</span></div><div><strong>${planning.length}</strong><span>plans to prepare</span></div><div><strong>${gaps.length}</strong><span>data gaps</span></div>`;
+  $('#attention-summary').innerHTML = `<div><strong data-count="${data.athlete_count}">${data.athlete_count}</strong><span>${data.athlete_count === 1 ? 'athlete' : 'athletes'} accessible</span></div><div><strong data-count="${review.length}">${review.length}</strong><span>rides and check-ins to review</span></div><div><strong data-count="${planning.length}">${planning.length}</strong><span>plans to prepare</span></div><div><strong data-count="${gaps.length}">${gaps.length}</strong><span>data gaps</span></div>`;
+  renderTrainingTrend(data.training_trend);
+  animateEntry($('#attention-view'), `attention:${viewVisit}`);
   $('#attention-coverage').hidden = !data.activity_coverage_limited && !data.ride_review_coverage_limited;
   $('#attention-coverage').textContent = [
     data.ride_review_coverage_limited ? 'Showing the first 200 ride reviews, with undecided rides first. More will appear as you clear these.' : '',
@@ -363,7 +410,7 @@ function renderAthlete() {
   const section = state.athleteSection;
   $('#athlete-pane').innerHTML = `
     <button type="button" class="mobile-back quiet" data-action="back-to-roster">← All athletes</button>
-    <header class="athlete-top"><div class="athlete-identity"><h2>${safe(name)}</h2><p>${safe(title(p.primary_sport || 'Training'))}${isSelf ? ' · Your training' : ' · Athlete'}</p></div><div class="metrics" aria-label="Athlete training measures">${cells.map((c) => `<div class="metric"><span>${safe(c[0])}</span><strong>${safe(c[1])}</strong><small>${safe(c[2])}</small></div>`).join('')}</div><div class="athlete-actions">${week >= currentWeek() ? `<button type="button" class="primary" data-action="new-workout">Add workout</button><button type="button" class="secondary" data-action="build-week">Plan week</button>` : '<button type="button" class="secondary" data-action="this-week">Go to this week</button>'}</div></header>
+    <header class="athlete-top"><div class="athlete-identity"><h2>${safe(name)}</h2><p>${safe(title(p.primary_sport || 'Training'))}${isSelf ? ' · Your training' : ' · Athlete'}</p></div><div class="metrics" aria-label="Athlete training measures">${cells.map((c) => `<div class="metric"><span>${safe(c[0])}</span><strong data-count="${safe(c[1])}">${safe(c[1])}</strong><small>${safe(c[2])}</small></div>`).join('')}</div><div class="athlete-actions">${week >= currentWeek() ? `<button type="button" class="primary" data-action="new-workout">Add workout</button><button type="button" class="secondary" data-action="build-week">Plan week</button>` : '<button type="button" class="secondary" data-action="this-week">Go to this week</button>'}</div></header>
 
     <details class="load-disclosure"><summary>Training load · ${metrics?.metric_date ? safe(dateLabel(metrics.metric_date)) : 'No record'}</summary><p class="load-timestamp">${metrics?.metric_date ? 'Training load last recorded: ' + safe(utcLabel(metrics.metric_date)) : 'No training-load record available.'} Modeled load may include estimates; review the data behind it before planning.</p></details><div class="athlete-section-nav" role="group" aria-label="Athlete view">${[['calendar','Calendar'],['analysis','Dashboard'],['season','Season'],['library','Workout library'],['profile','Profile & zones'],['notes','Notes & calls'],['tools','Tools']].map(([value,label]) => `<button type="button" data-athlete-section="${value}" aria-pressed="${section === value}">${label}</button>`).join('')}</div>
     <section class="week-section" ${section !== 'calendar' ? 'hidden' : ''}>${state.calendarLayout === 'month' ? renderMonthCalendar(week) : renderCalendar(week, workouts)}</section>
@@ -379,6 +426,7 @@ function renderAthlete() {
     const needed = state.calendarLayout === 'month' ? monthWeeks(state.calendarMonth) : [week];
     needed.filter((item) => !state.calendarRecords[item]).forEach(loadCalendarActivities);
   }
+  animateEntry($('#athlete-pane'), `athlete:${state.athleteId}:${section}:${state.calendarLayout}:${viewVisit}`);
 }
 async function saveAthleteSettings() {
   const form = $('#athlete-settings-form');
@@ -1193,7 +1241,8 @@ addEventListener('popstate', () => {
   if (route[0] === 'activity' && state.roster.some((p) => p.id === route[1])) { selectAthlete(route[1], { openDetail: true, updateRoute: false }).then(() => { if (state.athlete) openActivity(route[2]); }); return; }
   if (route[0] === 'attention') { showAttention(); return; }
   if (route[0] === 'devices') { showDevices(); return; }
-  if (route[0] === 'team' || !route[0]) { showAthletes(false); state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); return; }
+  if (!route[0]) { showAttention(); return; }
+  if (route[0] === 'team') { showAthletes(false); state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); return; }
   if (route[0] === 'athlete' && state.roster.some((p) => p.id === route[1])) { showAthletes(false, false); selectAthlete(route[1], { openDetail: true, updateRoute: false }); }
 });
 $('#athlete-pane').addEventListener('click', (event) => {

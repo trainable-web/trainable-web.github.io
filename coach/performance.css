@@ -40,7 +40,7 @@ small,.helper,.foot-note { font-size:12px; line-height:1.5; }
 .topbar .workspace-nav-item:hover { background:#1c2d4b; color:#fff; }
 body:has(#auth-page:not([hidden])) .workspace-nav,body:has(#drawer:not([hidden])) .workspace-nav { display:none; }
 .auth-page { display:block; padding:64px 16px; }
-.auth-card { border-radius:4px; box-shadow:0 8px 32px #14274b0a; }
+.auth-card { border-radius:4px; box-shadow:none; }
 .auth-card h1 { font-size:28px; line-height:1.2; letter-spacing:0; }
 .workspace { width:100%; max-width:none; padding:0; }
 .workspace-head { min-height:56px; margin:0; padding:8px 24px; border-bottom:1px solid var(--line); background:#fff; }
