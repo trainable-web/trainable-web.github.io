@@ -285,6 +285,7 @@ body:has(#auth-page:not([hidden])) .top-actions { display:none; }
   .auth-page { min-height:calc(100vh - 58px); padding:28px 12px; }
   .auth-card { padding:25px; }
 }
+
 @media(max-width:390px) {
   .topbar .workspace-nav-item { font-size:11px; gap:4px; padding-inline:4px; }
   .nav-icon { width:16px; height:16px; flex-basis:16px; }
@@ -514,3 +515,153 @@ h1,h2,h3,h4 { color:var(--ink); }
   .calendar-body { display:block; }
   #devices-content { grid-template-columns:1fr; }
 }
+
+/* Desktop coach workspace: clear navigation, athlete-first overview and data surfaces. */
+:root { --paper:#f4f7fc; --surface:#fff; --ink:#17283d; --muted:#5b6c82; --line:#dbe5f0; --green:#236db7; --green-soft:#e9f3ff; --navy:#122d50; --red:#b92f4a; --red-soft:#fff0f3; --amber:#936018; --amber-soft:#fff7e8; }
+:focus-visible { outline-color:#2e7ed1; }
+.primary { background:#236db7; border-color:#236db7; }
+.primary:hover { background:#185b9f; border-color:#185b9f; }
+.topbar { width:250px; background:#122d50; padding:19px 13px 17px; transition:width var(--motion-200) var(--ease-out); }
+.brand-wrap { position:relative; display:flex; justify-content:space-between; align-items:center; padding:2px 8px 21px; }
+.brand { display:flex; align-items:center; gap:11px; line-height:1.1; }
+.brand img { width:38px; height:38px; background:#fff; }
+.brand-text { display:flex; flex-direction:column; gap:3px; }
+.brand-text small { color:#acc9e7; font-size:12px; font-weight:600; letter-spacing:0; text-transform:none; }
+.nav-collapse { flex:0 0 34px; width:34px; min-height:34px; padding:0; border:1px solid #ffffff37; border-radius:9px; color:#d8e8f7; background:#ffffff10; font-size:25px; line-height:1; }
+.nav-collapse:hover { background:#ffffff25; }
+.topbar .workspace-nav { gap:5px; margin-top:19px; overflow-y:auto; overscroll-behavior:contain; }
+.topbar .workspace-nav-item { min-height:46px; gap:12px; padding:0 12px; border-radius:10px; }
+.topbar .workspace-nav-item { position:relative; }
+.attention-badge[hidden] { display:none!important; }
+.topbar .workspace-nav-item[aria-current=page] { background:#fff; color:#164a80; }
+.nav-group-row { display:flex; align-items:center; }
+.nav-group-row #show-athletes { flex:1; min-width:0; }
+.nav-group-toggle { flex:0 0 35px; min-height:44px; padding:0; border:0; color:#bcd0e4; background:none; font-size:20px; }
+.nav-group-toggle:hover { color:white; }
+.nav-sublist { margin:3px 0 7px 33px; padding-left:10px; border-left:1px solid #ffffff27; }
+.nav-sublist[hidden] { display:none; }
+.nav-sublist button { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; min-height:39px; padding:6px 9px; border:0; border-radius:8px; color:#c5d7e8; background:none; font-size:12px; text-align:left; }
+.nav-sublist button:hover,.nav-sublist button:focus-visible { color:#fff; background:#ffffff18; }
+.nav-sublist .attention-badge { min-width:18px; height:18px; font-size:10px; }
+.nav-empty { display:block; padding:10px; color:#a7bfd6; font-size:12px; }
+.nav-chevron { margin-left:auto; color:#a8c6e1; }
+.top-actions { margin-top:auto; }
+.workspace { width:calc(100% - 250px); margin-left:250px; padding-inline:clamp(22px,3vw,48px); transition:margin-left var(--motion-200) var(--ease-out),width var(--motion-200) var(--ease-out); }
+body:has(#drawer.page-mode:not([hidden])) #drawer.page-mode { width:calc(100% - 250px); max-width:none; min-height:100vh; margin:0 0 0 250px; }
+body:has(#drawer.page-mode:not([hidden])) #drawer.page-mode .drawer-head,body:has(#drawer.page-mode:not([hidden])) #drawer.page-mode .drawer-body { width:100%; max-width:1490px; margin-inline:auto; }
+body.nav-compact .topbar { width:75px; }
+body.nav-compact .workspace { width:calc(100% - 75px); margin-left:75px; }
+body.nav-compact:has(#drawer.page-mode:not([hidden])) #drawer.page-mode { width:calc(100% - 75px); margin-left:75px; }
+body.nav-compact .brand-wrap { justify-content:center; padding:2px 0 15px; }
+body.nav-compact .brand-text,body.nav-compact .topbar .workspace-nav-item>span:not(.attention-badge),body.nav-compact .top-actions,body.nav-compact .nav-group-toggle,body.nav-compact .nav-sublist { display:none!important; }
+body.nav-compact .brand { gap:0; }
+body.nav-compact .nav-collapse { position:absolute; left:15px; top:61px; width:32px; height:32px; min-height:32px; background:#1d456f; }
+body.nav-compact .nav-collapse::first-letter { color:white; }
+body.nav-compact .topbar .workspace-nav { margin-top:43px; }
+body.nav-compact .topbar .workspace-nav-item { justify-content:center; width:48px; min-height:48px; margin:auto; padding:0; }
+body.nav-compact .nav-group-row #show-athletes { flex:0 0 48px; }
+body.nav-compact .attention-badge { position:absolute; transform:translate(15px,-13px); }
+.attention-head { min-height:112px; padding:24px 28px; border:1px solid var(--line); box-shadow:0 6px 18px #163e6a0a; }
+.attention-head h2 { font-size:27px; margin:5px 0; }
+.attention-head p:last-child { color:var(--muted); }
+.attention-summary { margin:16px 0; border:1px solid var(--line); box-shadow:none; }
+.attention-summary>div { min-height:100px; padding:16px 22px!important; }
+.attention-summary strong { font-size:31px; }
+.attention-summary>div:nth-child(2) strong { color:#b92f4a; }
+.dashboard-athletes { margin:0 0 18px; padding:23px 26px 6px; border:1px solid var(--line); border-radius:18px; background:#fff; box-shadow:0 6px 18px #163e6a0a; }
+.dashboard-athletes>.section-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin:0 0 13px; }
+.dashboard-athletes h3 { margin:3px 0; font-size:23px; }
+.dashboard-athletes p { margin:0; color:var(--muted); font-size:13px; }
+.dashboard-athlete-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 16px; }
+.dashboard-athlete { display:grid; grid-template-columns:minmax(0,1fr) minmax(120px,.9fr) auto; align-items:center; gap:14px; min-width:0; padding:15px 0; border-top:1px solid var(--line); }
+.dashboard-athlete-main { display:flex; align-items:center; gap:11px; min-width:0; }
+.dashboard-athlete-main h4 { margin:0 0 3px; font-size:15px; }
+.dashboard-athlete-main p { font-size:12px; }
+.dashboard-athlete-status { display:flex; flex-direction:column; align-items:flex-start; gap:5px; min-width:0; }
+.dashboard-athlete-status small { overflow:hidden; max-width:100%; color:var(--muted); font-size:12px; white-space:nowrap; text-overflow:ellipsis; }
+.dashboard-alert,.dashboard-clear { color:#a92b44; font-size:12px; font-weight:700; }
+.dashboard-clear { color:#39724e; }
+.dashboard-athlete-actions { display:flex; align-items:center; gap:5px; }
+.dashboard-athlete-actions button { min-height:39px; padding:0 10px; font-size:12px; white-space:nowrap; }
+.queue-panel,.training-trend { border:1px solid var(--line); box-shadow:0 6px 18px #163e6a0a; }
+.attention-item p,.roster-search label,.roster-filters label { color:#52667c; }
+.pane-heading #roster-count,.roster-filters[open] summary { background:#eaf2fb; }
+.roster-table-head,.roster-item { grid-template-columns:minmax(250px,2fr) minmax(130px,1fr) minmax(160px,1.15fr) 92px; }
+.roster-item { min-height:78px; }
+.roster-access { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.athlete-top .metrics { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); }
+.calendar-cell { min-height:310px; }
+.calendar-cell-heading { background:#edf3fb; }
+.workout-profile>span { opacity:.9; border-radius:3px 3px 0 0; }
+.workout-profile>span[data-zone=recovery] { background:#6fb6e9; }
+.workout-profile>span[data-zone=endurance] { background:#39a5d5; }
+.workout-profile>span[data-zone=tempo] { background:#58b96e; }
+.workout-profile>span[data-zone=sweet_spot] { background:#c5bb35; }
+.workout-profile>span[data-zone=threshold] { background:#f1a641; }
+.workout-profile>span[data-zone=vo2max] { background:#ef6b5c; }
+.workout-profile>span[data-zone=anaerobic] { background:#a965c4; }
+.workout-profile>span[data-zone=open] { background:#8b9cb0; }
+.block-row[data-zone] { border-left:5px solid #8b9cb0; background:#f7faff; }
+.block-row[data-zone=recovery] { border-left-color:#6fb6e9; }.block-row[data-zone=endurance] { border-left-color:#39a5d5; }.block-row[data-zone=tempo] { border-left-color:#58b96e; }.block-row[data-zone=sweet_spot] { border-left-color:#c5bb35; }.block-row[data-zone=threshold] { border-left-color:#f1a641; }.block-row[data-zone=vo2max] { border-left-color:#ef6b5c; }.block-row[data-zone=anaerobic] { border-left-color:#a965c4; }
+.week-edit-list { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); align-items:start; gap:9px; }
+.week-edit-day { min-width:0; padding:12px; border:1px solid var(--line); border-radius:11px; background:#fff; }
+.week-edit-day.locked { background:#f3f6fa; }
+.week-edit-day[draggable=true] { cursor:grab; }
+.week-edit-day.drag-target { outline:2px solid #2d78c5; }
+.week-edit-heading { align-items:flex-start; flex-direction:column; gap:3px; }
+.week-edit-day summary { color:#236db7; }
+.week-edit-day details[open] { position:relative; z-index:2; }
+.week-edit-day .block-row { grid-template-columns:1fr; }
+.week-edit-day .block-row .move-controls { grid-column:1; }
+.week-edit-day .block-row label { font-size:12px; }
+.week-edit-day .block-row select,.week-edit-day .block-row input { width:100%; }
+.week-plan-overview { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:8px; margin:20px 0; }
+.week-plan-day { min-height:128px; padding:13px; border:1px solid var(--line); border-radius:11px; background:#fff; }
+.week-plan-day>strong,.week-plan-day>span,.week-plan-day>small { display:block; }
+.week-plan-day strong { color:#1a5e9d; font-size:15px; }
+.week-plan-day>span:not(.workout-profile) { margin:12px 0 7px; color:var(--ink); font-weight:700; font-size:13px; }
+.week-plan-day small { color:var(--muted); font-size:12px; }
+.week-plan-day>.workout-profile { display:flex; width:100%; height:31px; margin:10px 0 0; overflow:hidden; }
+.week-plan-day .workout-profile>span { display:block; margin:0; }
+.week-zone-strip { display:flex; align-items:end; gap:2px; height:35px; margin:10px 0 2px; }
+.week-zone-strip>span { height:100%; min-width:2px; border-radius:2px 2px 0 0; }
+.week-zone-strip>span[data-zone=recovery] { background:#6fb6e9; }.week-zone-strip>span[data-zone=endurance] { background:#39a5d5; }.week-zone-strip>span[data-zone=tempo] { background:#58b96e; }.week-zone-strip>span[data-zone=sweet_spot] { background:#c5bb35; }.week-zone-strip>span[data-zone=threshold] { background:#f1a641; }.week-zone-strip>span[data-zone=vo2max] { background:#ef6b5c; }.week-zone-strip>span[data-zone=anaerobic] { background:#a965c4; }.week-zone-strip>span[data-zone=open] { background:#8b9cb0; }
+.coach-settings { max-width:1640px; margin:0 auto; }
+.settings-shell { display:grid; grid-template-columns:210px minmax(0,740px); gap:18px; align-items:start; }
+.settings-index,.settings-card { padding:24px; border:1px solid var(--line); border-radius:16px; background:#fff; }
+.settings-index { position:sticky; top:18px; display:flex; flex-direction:column; gap:5px; }
+.settings-index strong { margin-bottom:11px; }
+.settings-index button { min-height:42px; padding:11px; border:0; border-radius:8px; color:#225d99; background:transparent; text-align:left; }
+.settings-index button:hover { background:#eaf3fc; }
+.settings-content { display:grid; gap:18px; }
+.settings-card h2 { margin:6px 0; font-size:24px; }
+.settings-card p:not(.eyebrow) { color:var(--muted); }
+.settings-choice { display:flex; align-items:center; gap:13px; min-height:70px; padding:14px 0; border-top:1px solid var(--line); cursor:pointer; }
+.settings-choice input { width:19px; height:19px; min-height:19px; }
+.settings-choice span { display:flex; flex-direction:column; gap:4px; }
+.settings-choice small { color:var(--muted); }
+.load-chart-controls { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.load-chart-controls button { display:inline-flex; align-items:center; gap:7px; min-height:37px; padding:5px 11px; border:1px solid #b7cce0; border-radius:8px; color:#20517f; background:#fff; font-size:12px; font-weight:700; }
+.load-chart-controls button[aria-pressed=false] { color:#687c91; border-color:#d7e2ec; background:#f4f7fa; }
+.load-chart-controls button i,.chart-hover-popover i { display:inline-block; flex:none; width:8px; height:8px; border-radius:50%; }
+.chart-inspect { position:relative; outline-offset:3px; }
+.chart-inspect-line { stroke:#58718a; stroke-width:1.5; stroke-dasharray:4 3; }
+.chart-data-point { opacity:0; transition:opacity 100ms ease; }
+.chart-inspect:hover .chart-data-point,body.chart-points .chart-data-point,.chart-inspect:focus-visible .chart-data-point { opacity:1; }
+.chart-hover-popover { position:absolute; top:15px; z-index:3; display:grid; gap:4px; min-width:150px; max-width:230px; padding:10px 12px; border:1px solid #c8d8e9; border-radius:9px; color:#183953; background:#fff; box-shadow:0 8px 22px #18395320; font-size:12px; pointer-events:none; transform:translateX(-20%); }
+.chart-hover-popover[hidden] { display:none; }
+.chart-hover-popover span { display:flex; align-items:center; gap:7px; }
+.chart-hover-popover b { margin-left:auto; }
+.session-step-list { border-radius:10px; overflow:hidden; }
+.session-step-list li { border-left:6px solid #8b9cb0; }
+.session-step-list li[data-zone=recovery] { border-left-color:#6fb6e9; background:#f1f8fe; }
+.session-step-list li[data-zone=endurance] { border-left-color:#39a5d5; background:#eef9fc; }
+.session-step-list li[data-zone=tempo] { border-left-color:#58b96e; background:#f1faf3; }
+.session-step-list li[data-zone=sweet_spot] { border-left-color:#c5bb35; background:#fbfaec; }
+.session-step-list li[data-zone=threshold] { border-left-color:#f1a641; background:#fff8eb; }
+.session-step-list li[data-zone=vo2max] { border-left-color:#ef6b5c; background:#fff2ef; }
+.session-step-list li[data-zone=anaerobic] { border-left-color:#a965c4; background:#faf2ff; }
+body:has(#auth-page:not([hidden])) .nav-collapse { display:none; }
+body:has(#drawer.page-mode:not([hidden])) .topbar .workspace-nav { display:flex; }
+@media(min-width:768px) and (max-width:1440px) { .dashboard-athlete-list { grid-template-columns:1fr; }.week-edit-list { grid-template-columns:repeat(3,minmax(0,1fr)); }.week-plan-overview { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media(max-width:767.98px) { .topbar { width:100%; }.workspace,body.nav-compact .workspace { width:100%; margin-left:0; }body:has(#drawer.page-mode:not([hidden])) #drawer.page-mode,body.nav-compact:has(#drawer.page-mode:not([hidden])) #drawer.page-mode { width:100%; margin-left:0; }.nav-collapse { display:none; }.brand-text small { color:#acc9e7; }.topbar .workspace-nav { display:flex; overflow-x:auto; overflow-y:hidden; flex-wrap:nowrap; }.topbar .workspace-nav-item { flex:0 0 auto; width:auto; min-width:90px; padding-inline:10px; }.topbar .nav-group { flex:0 0 auto; }.topbar .nav-group-row #show-athletes { flex:0 0 auto; min-width:90px; }.nav-group-toggle,.nav-sublist { display:none!important; }.dashboard-athlete-list { grid-template-columns:1fr; }.dashboard-athlete { display:flex; flex-wrap:wrap; gap:12px; }.dashboard-athlete-name { flex:1 1 100%; }.dashboard-athlete-status { flex:1 1 100%; }.dashboard-athlete-actions { margin-left:0; }.settings-shell { display:block; }.settings-index { position:static; flex-direction:row; margin-bottom:14px; }.week-edit-list,.week-plan-overview { grid-template-columns:repeat(2,minmax(0,1fr)); } }
