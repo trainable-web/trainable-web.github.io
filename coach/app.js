@@ -181,10 +181,10 @@ async function loadWorkspace() {
   showAthletes(false, false);
   const wanted = ['athlete', 'builder', 'meeting', 'week', 'note', 'activity'].includes(route[0]) ? route[1] : null;
   const validWanted = state.roster.some((p) => p.id === wanted) ? wanted : null;
-  const openDetail = Boolean(validWanted) || state.roster.length === 1;
-  state.mobileDetailOpen = openDetail;
-  $('#workspace').classList.toggle('mobile-detail-open', openDetail);
-  await selectAthlete(validWanted || (state.roster.some((p) => p.id === state.athleteId) ? state.athleteId : state.roster[0]?.id), { updateRoute: openDetail || !matchMedia('(max-width: 767.98px)').matches });
+  if (!validWanted) { refreshAttentionBadge(); return; }
+  state.mobileDetailOpen = true;
+  $('#workspace').classList.add('mobile-detail-open');
+  await selectAthlete(validWanted, { openDetail: true, updateRoute: false });
   if (route[0] === 'builder' && wanted === state.athleteId) openBuilder();
   if (route[0] === 'meeting' && wanted === state.athleteId) openMeeting();
   if (route[0] === 'week' && wanted === state.athleteId) openWeek();
@@ -293,9 +293,9 @@ async function refreshAttentionBadge() {
 }
 function showAthletes(updateRoute = true, loadSelection = true) {
   setWorkspaceView('athletes');
-  if (updateRoute) { state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); }
-  if (updateRoute && (location.hash === '#attention' || location.hash === '#devices')) history.pushState(null, '', '#team');
-  if (loadSelection && !state.athlete && state.roster.length) selectAthlete(state.roster[0].id, { updateRoute: false });
+  if (updateRoute || location.hash === '#team') { state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); }
+  if (updateRoute && location.hash !== '#team') history.pushState(null, '', '#team');
+  if (loadSelection) renderRoster();
 }
 function rideDecisionMarkup(item) {
   const review = item.ride_review;
@@ -331,12 +331,17 @@ function renderTrainingTrend(days) {
   const max = Math.max(30, ...values);
   const change = previous ? `${Math.round((current - previous) / previous * 100)}% vs prior 7 days` : 'Prior 7 days: no recorded training';
   node.hidden = false;
-  node.innerHTML = `<div class="trend-copy"><div><p class="eyebrow">RECORDED TRAINING · 14 DAYS</p><h3>Training time</h3><p>Activities across connected athletes. Recorded time is separate from planned sessions.</p></div><div class="trend-total"><strong data-count="${current}">${current}</strong><span>min in the last 7 days</span><small>${safe(change)}</small></div></div><div class="trend-bars" role="img" aria-label="Recorded training minutes by day for the last 14 days"><div class="trend-grid" aria-hidden="true">${days.map((day, index) => `<span class="trend-day ${index >= 7 ? 'current' : 'previous'}" style="--bar-height:${Math.max(4, Math.round(values[index] / max * 100))}%" title="${safe(day.date)}: ${values[index]} minutes"><i></i></span>`).join('')}</div><div class="trend-axis"><span>${safe(days[0].date.slice(5))}</span><span>${safe(days[7].date.slice(5))}</span><span>${safe(days[13].date.slice(5))}</span></div></div>`;
+  node.innerHTML = `<div class="trend-copy"><div><p class="eyebrow">RECORDED TRAINING · 14 DAYS</p><h3>Training time</h3><p>Activities across connected athletes. Recorded time is separate from planned sessions.</p></div><div class="trend-total"><strong data-count="${current}">${current}</strong><span>min in the last 7 days</span><small>${safe(change)}</small></div></div><div class="trend-bars" role="img" aria-label="Recorded training minutes by day for the last 14 days"><div class="trend-scale"><span>Minutes per day</span><span>Peak ${max} min</span></div><div class="trend-grid" aria-hidden="true">${days.map((day, index) => `<span class="trend-day ${index >= 7 ? 'current' : 'previous'}" style="--bar-height:${Math.max(4, Math.round(values[index] / max * 100))}%" title="${safe(day.date)}: ${values[index]} minutes"><i></i></span>`).join('')}</div><div class="trend-axis"><span>${safe(days[0].date.slice(5))}</span><span>${safe(days[7].date.slice(5))}</span><span>${safe(days[13].date.slice(5))}</span></div><div class="trend-legend"><span><i class="previous"></i>Prior 7 days</span><span><i class="current"></i>Last 7 days</span></div></div>`;
 }
 function renderAttention() {
   const data = state.attention; if (!data) return;
   const open = data.items.filter((item) => !item.reviewed_at);
   const review = open.filter((item) => item.priority === 'review');
+  const next = open[0];
+  $('#attention-title').textContent = next ? `${next.athlete_name} needs your attention.` : 'Your coaching desk is clear.';
+  $('#attention-intro').textContent = next ? next.headline + ' · ' + next.explanation : 'No open items in the available data. Review athletes or refresh to check for new reports.';
+  $('#open-next-attention').hidden = !next;
+  $('#open-next-attention').textContent = next?.priority === 'planning' ? 'Open next plan' : 'Open next athlete';
   const badge = $('#attention-badge'); badge.hidden = review.length === 0; badge.textContent = String(review.length);
   $('#show-attention').setAttribute('aria-label', review.length ? `Dashboard, ${review.length} reviews need attention` : 'Dashboard');
   const planning = open.filter((item) => item.priority === 'planning');
@@ -362,13 +367,23 @@ function renderAttention() {
 }
 function renderRoster() {
   const query = $('#roster-query').value.trim().toLocaleLowerCase();
-  const filtered = state.roster.filter((p) => (p.display_name || (p.is_self ? 'Your training' : 'Athlete')).toLocaleLowerCase().includes(query));
+  const sport = $('#roster-sport').value;
+  const sports = [...new Set(state.roster.map((p) => p.primary_sport || 'training'))].sort();
+  $('#roster-sport').innerHTML = '<option value="">All sports</option>' + sports.map((value) => `<option value="${safe(value)}" ${value === sport ? 'selected' : ''}>${safe(title(value))}</option>`).join('');
+  const filtered = state.roster.filter((p) => (p.display_name || (p.is_self ? 'Your training' : 'Athlete')).toLocaleLowerCase().includes(query) && (!sport || (p.primary_sport || 'training') === sport)).sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
+  const pages = Math.max(1, Math.ceil(filtered.length / 12));
+  state.rosterPage = Math.min(state.rosterPage || 0, pages - 1);
+  const page = filtered.slice(state.rosterPage * 12, (state.rosterPage + 1) * 12);
   $('#roster-count').textContent = `${state.roster.length} ${state.roster.length === 1 ? 'athlete' : 'athletes'}`;
-  $('#roster-list').innerHTML = filtered.length ? filtered.map((p) => {
+  $('#roster-range').textContent = filtered.length ? `Showing ${state.rosterPage * 12 + 1}–${Math.min(filtered.length, (state.rosterPage + 1) * 12)} of ${filtered.length}` : 'Showing 0 athletes';
+  document.querySelector('[data-roster-page="-1"]').disabled = state.rosterPage === 0;
+  document.querySelector('[data-roster-page="1"]').disabled = state.rosterPage >= pages - 1;
+  $('#roster-list').innerHTML = page.length ? page.map((p) => {
     const name = p.display_name || (p.is_self ? 'Your training' : 'Athlete');
     const initials = name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('');
-    return `<button type="button" class="roster-item ${p.id === state.athleteId ? 'active' : ''}" data-athlete="${safe(p.id)}" aria-current="${p.id === state.athleteId ? 'page' : 'false'}"><span class="roster-avatar" aria-hidden="true">${safe(initials)}</span><span class="roster-copy"><strong>${safe(name)}</strong><small>${p.is_self ? 'Your training' : 'Coach access'} · ${safe(title(p.primary_sport || 'training'))}</small></span><span class="roster-arrow" aria-hidden="true">›</span></button>`;
-  }).join('') : `<div class="roster-empty"><strong>No athletes found</strong><p>Try another name or clear your search.</p><button type="button" class="secondary small-button" data-clear-roster>Clear search</button></div>`;
+    const reviews = state.attention?.items.filter((item) => item.athlete_id === p.id && !item.reviewed_at && item.priority === 'review').length || 0;
+    return `<button type="button" class="roster-item" data-athlete="${safe(p.id)}" aria-label="Open ${safe(name)} training workspace${reviews ? `, ${reviews} ${reviews === 1 ? 'review' : 'reviews'} need attention` : ''}"><span class="roster-person"><span class="roster-avatar" aria-hidden="true">${safe(initials)}</span><span class="roster-copy"><strong>${safe(name)}</strong><small>${p.is_self ? 'Your training' : 'Athlete'}${reviews ? ` <em class="roster-alert">${reviews} to review</em>` : ''}</small></span></span><span class="roster-sport">${safe(title(p.primary_sport || 'training'))}</span><span class="roster-access">${p.is_self ? 'Your account' : 'Coach access'}</span><span class="roster-open">Open <span aria-hidden="true">↗</span></span></button>`;
+  }).join('') : `<div class="roster-empty"><strong>${state.roster.length ? 'No athletes found' : 'No athletes connected yet'}</strong><p>${state.roster.length ? 'Try another name or clear your filters.' : 'Connect an athlete to begin planning and reviewing training.'}</p><button type="button" class="secondary small-button" data-clear-roster>${state.roster.length ? 'Clear filters' : 'Connect an athlete'}</button></div>`;
 }
 async function selectAthlete(id, options = {}) {
   if (!id) { $('#athlete-pane').innerHTML = '<div class="list-empty"><h2>Connect your first athlete</h2><p>Use an invite code from the athlete to open their training calendar.</p><button type="button" class="primary" data-action="connect-athlete">Connect an athlete</button></div>'; return; }
@@ -1096,6 +1111,7 @@ $('#sign-out').addEventListener('click', async () => {
 $('#retry-workspace').addEventListener('click', resumeWorkspace);
 $('#show-attention').addEventListener('click', showAttention);
 $('#show-athletes').addEventListener('click', () => showAthletes());
+$('#search-athletes').addEventListener('click', () => { showAthletes(); $('#roster-query').focus(); });
 $('#show-devices').addEventListener('click', showDevices);
 $('#devices-content').addEventListener('click', async (event) => {
   const button = event.target.closest('button'); if (!button) return;
@@ -1148,6 +1164,13 @@ $('#remove-garmin-dialog').addEventListener('close', async () => {
   catch (error) { setStatus(error.message, true); trigger?.focus(); }
 });
 $('#refresh-attention').addEventListener('click', showAttention);
+$('#open-next-attention').addEventListener('click', async () => {
+  const next = state.attention?.items.find((item) => !item.reviewed_at);
+  if (!next) return;
+  showAthletes(false, false);
+  await selectAthlete(next.athlete_id, { openDetail: true, pushRoute: true });
+  if (next.ride_review?.activity_id && state.athlete) openActivity(next.ride_review.activity_id);
+});
 $('.attention-filters').addEventListener('click', (event) => {
   const filter = event.target.closest('[data-attention-filter]')?.dataset.attentionFilter;
   if (!filter) return; state.attentionFilter = filter; renderAttention();
@@ -1217,9 +1240,11 @@ $('#attention-list').addEventListener('click', async (event) => {
   }
 });
 addEventListener('storage', (event) => { if (event.key === SESSION_KEY && !event.newValue && !$('#workspace').hidden) { state.roster = []; state.athlete = null; state.athleteId = null; showAuth('Signed out in another tab.'); } });
-$('#roster-query').addEventListener('input', renderRoster);
+$('#roster-query').addEventListener('input', () => { state.rosterPage = 0; renderRoster(); });
+$('#roster-sport').addEventListener('change', () => { state.rosterPage = 0; renderRoster(); });
+$('.roster-pagination').addEventListener('click', (event) => { const page = event.target.closest('[data-roster-page]'); if (!page) return; state.rosterPage += Number(page.dataset.rosterPage); renderRoster(); $('#roster-list').querySelector('[data-athlete]')?.focus(); });
 $('#roster-list').addEventListener('click', (event) => {
-  if (event.target.closest('[data-clear-roster]')) { $('#roster-query').value = ''; renderRoster(); $('#roster-query').focus(); return; }
+  if (event.target.closest('[data-clear-roster]')) { if (!state.roster.length) { $('#join-team').click(); return; } $('#roster-query').value = ''; $('#roster-sport').value = ''; state.rosterPage = 0; renderRoster(); $('#roster-query').focus(); return; }
   const button = event.target.closest('[data-athlete]');
   if (button) { selectAthlete(button.dataset.athlete, { openDetail: true, pushRoute: true }); if (matchMedia('(max-width: 767.98px)').matches) scrollTo(0, 0); }
 });
@@ -1267,7 +1292,7 @@ $('#athlete-pane').addEventListener('click', (event) => {
   const addDay = event.target.closest('[data-add-calendar-day]');
   if (addDay) { const targetWeek = addDay.dataset.addWeek || state.calendarWeek; if (targetWeek === currentWeek()) openBuilder('', Number(addDay.dataset.addCalendarDay)); else openWeek(targetWeek); return; }
   const action = event.target.closest('[data-action]')?.dataset.action;
-  if (action === 'back-to-roster') { state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); history.pushState(null, '', '#team'); $('#roster-query').focus(); scrollTo(0, 0); return; }
+  if (action === 'back-to-roster') { state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open'); history.pushState(null, '', '#team'); renderRoster(); $('#roster-query').focus(); scrollTo(0, 0); return; }
   if (action === 'new-workout') { if (state.calendarWeek === nextWeek()) openWeek(nextWeek()); else openBuilder(); }
   if (action === 'this-week') { state.calendarWeek = currentWeek(); state.calendarMonth = localDate().slice(0,7); state.athleteSection = 'calendar'; renderAthlete(); $('[data-action="this-week"]').focus(); }
   if (action === 'retry-athlete') selectAthlete(state.athleteId);
@@ -1307,8 +1332,8 @@ $('#athlete-pane').addEventListener('input', (event) => {
 $('#athlete-pane').addEventListener('submit', (event) => {
   if (event.target.id === 'athlete-settings-form') { event.preventDefault(); saveAthleteSettings(); }
 });
-$('#invite-coach').addEventListener('click', invitePanel);
-$('#join-team').addEventListener('click', joinPanel);
+$('#invite-coach').addEventListener('click', () => { $('.new-menu').open = false; invitePanel(); });
+$('#join-team').addEventListener('click', () => { $('.new-menu').open = false; joinPanel(); });
 $('#close-drawer').addEventListener('click', () => closeDrawer());
 $('#drawer-backdrop').addEventListener('click', () => closeDrawer());
 $('#discard-dialog').addEventListener('close', () => { if ($('#discard-dialog').returnValue === 'confirm') closeDrawer(true); else $('#close-drawer').focus(); });
@@ -1320,6 +1345,10 @@ $('#reset-week-dialog').addEventListener('close', () => {
   state.resetTrigger = null;
 });
 document.addEventListener('keydown', (event) => {
+  if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !$('#workspace').hidden && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) && $('#drawer').hidden) {
+    event.preventDefault(); showAthletes(); $('#roster-query').focus();
+  }
+  if (event.key === 'Escape' && $('.new-menu').open) { $('.new-menu').open = false; $('.new-menu summary').focus(); }
   if (event.key === 'Escape' && !$('#drawer').hidden && !$('#revoke-dialog').open && !$('#discard-dialog').open
     && !$('#archive-note-dialog').open && !$('#reset-week-dialog').open) closeDrawer();
   if (event.key === 'Tab' && !$('#drawer').hidden && !$('#drawer').classList.contains('page-mode')) {

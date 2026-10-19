@@ -229,7 +229,7 @@ body:has(#auth-page:not([hidden])) .workspace-nav,body:has(#drawer:not([hidden])
 .note-row p,.meeting-row p { font-size:14px; }
 .profile-notes { margin-top:0; }
 /* All editors share the same frame and visible action area. */
-.drawer { background:#fff; box-shadow:-8px 0 32px #12254125; }
+.drawer { background:#fff; box-shadow:-8px 0 32px #211f1b20; }
 .drawer-backdrop { background:#0c193477; }
 .drawer-head { background:#fff; padding:16px 24px; align-items:center; }
 .drawer-head h2 { font-size:20px; }
