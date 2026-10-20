@@ -603,14 +603,22 @@ body.nav-compact .attention-badge { position:absolute; transform:translate(15px,
 .workout-profile>span[data-zone=open] { background:#8b9cb0; }
 .block-row[data-zone] { border-left:5px solid #8b9cb0; background:#f7faff; }
 .block-row[data-zone=recovery] { border-left-color:#6fb6e9; }.block-row[data-zone=endurance] { border-left-color:#39a5d5; }.block-row[data-zone=tempo] { border-left-color:#58b96e; }.block-row[data-zone=sweet_spot] { border-left-color:#c5bb35; }.block-row[data-zone=threshold] { border-left-color:#f1a641; }.block-row[data-zone=vo2max] { border-left-color:#ef6b5c; }.block-row[data-zone=anaerobic] { border-left-color:#a965c4; }
-.week-edit-list { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); align-items:start; gap:9px; }
+.week-edit-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:12px; }
 .week-edit-day { min-width:0; padding:12px; border:1px solid var(--line); border-radius:11px; background:#fff; }
+.week-edit-day:has(details[open]) { grid-column:1/-1; padding:18px; }
 .week-edit-day.locked { background:#f3f6fa; }
 .week-edit-day[draggable=true] { cursor:grab; }
 .week-edit-day.drag-target { outline:2px solid #2d78c5; }
 .week-edit-heading { align-items:flex-start; flex-direction:column; gap:3px; }
 .week-edit-day summary { color:#236db7; }
 .week-edit-day details[open] { position:relative; z-index:2; }
+.week-edit-day:has(details[open]) .week-edit-heading { flex-direction:row; align-items:baseline; }
+.week-edit-day:has(details[open]) .week-day-details { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px 18px; }
+.week-edit-day:has(details[open]) .week-day-details>.helper,.week-edit-day:has(details[open]) .week-day-details>.block-list,.week-edit-day:has(details[open]) .week-day-details>.week-day-ai { grid-column:1/-1; }
+.week-edit-day:has(details[open]) .week-day-details>.form-group { min-width:0; margin-bottom:0; }
+.week-edit-day:has(details[open]) .block-row { grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) 100px auto; }
+.week-edit-day:has(details[open]) .block-row .move-controls { grid-column:4; }
+.week-edit-day:has(details[open]) .week-day-ai textarea { max-width:700px; }
 .week-edit-day .block-row { grid-template-columns:1fr; }
 .week-edit-day .block-row .move-controls { grid-column:1; }
 .week-edit-day .block-row label { font-size:12px; }
@@ -663,5 +671,5 @@ body.nav-compact .attention-badge { position:absolute; transform:translate(15px,
 .session-step-list li[data-zone=anaerobic] { border-left-color:#a965c4; background:#faf2ff; }
 body:has(#auth-page:not([hidden])) .nav-collapse { display:none; }
 body:has(#drawer.page-mode:not([hidden])) .topbar .workspace-nav { display:flex; }
-@media(min-width:768px) and (max-width:1440px) { .dashboard-athlete-list { grid-template-columns:1fr; }.week-edit-list { grid-template-columns:repeat(3,minmax(0,1fr)); }.week-plan-overview { grid-template-columns:repeat(4,minmax(0,1fr)); } }
-@media(max-width:767.98px) { .topbar { width:100%; }.workspace,body.nav-compact .workspace { width:100%; margin-left:0; }body:has(#drawer.page-mode:not([hidden])) #drawer.page-mode,body.nav-compact:has(#drawer.page-mode:not([hidden])) #drawer.page-mode { width:100%; margin-left:0; }.nav-collapse { display:none; }.brand-text small { color:#acc9e7; }.topbar .workspace-nav { display:flex; overflow-x:auto; overflow-y:hidden; flex-wrap:nowrap; }.topbar .workspace-nav-item { flex:0 0 auto; width:auto; min-width:90px; padding-inline:10px; }.topbar .nav-group { flex:0 0 auto; }.topbar .nav-group-row #show-athletes { flex:0 0 auto; min-width:90px; }.nav-group-toggle,.nav-sublist { display:none!important; }.dashboard-athlete-list { grid-template-columns:1fr; }.dashboard-athlete { display:flex; flex-wrap:wrap; gap:12px; }.dashboard-athlete-name { flex:1 1 100%; }.dashboard-athlete-status { flex:1 1 100%; }.dashboard-athlete-actions { margin-left:0; }.settings-shell { display:block; }.settings-index { position:static; flex-direction:row; margin-bottom:14px; }.week-edit-list,.week-plan-overview { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(min-width:768px) and (max-width:1440px) { .dashboard-athlete-list { grid-template-columns:1fr; }.week-plan-overview { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media(max-width:767.98px) { .topbar { width:100%; }.workspace,body.nav-compact .workspace { width:100%; margin-left:0; }body:has(#drawer.page-mode:not([hidden])) #drawer.page-mode,body.nav-compact:has(#drawer.page-mode:not([hidden])) #drawer.page-mode { width:100%; margin-left:0; }.nav-collapse { display:none; }.brand-text small { color:#acc9e7; }.topbar .workspace-nav { display:flex; overflow-x:auto; overflow-y:hidden; flex-wrap:nowrap; }.topbar .workspace-nav-item { flex:0 0 auto; width:auto; min-width:90px; padding-inline:10px; }.topbar .nav-group { flex:0 0 auto; }.topbar .nav-group-row #show-athletes { flex:0 0 auto; min-width:90px; }.nav-group-toggle,.nav-sublist { display:none!important; }.dashboard-athlete-list { grid-template-columns:1fr; }.dashboard-athlete { display:flex; flex-wrap:wrap; gap:12px; }.dashboard-athlete-name { flex:1 1 100%; }.dashboard-athlete-status { flex:1 1 100%; }.dashboard-athlete-actions { margin-left:0; }.settings-shell { display:block; }.settings-index { position:static; flex-direction:row; margin-bottom:14px; }.week-edit-list,.week-plan-overview { grid-template-columns:repeat(2,minmax(0,1fr)); }.week-edit-day:has(details[open]) .week-day-details { display:block; }.week-edit-day:has(details[open]) .block-row { grid-template-columns:1fr; }.week-edit-day:has(details[open]) .block-row .move-controls { grid-column:1; } }
