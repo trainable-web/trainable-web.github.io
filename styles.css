@@ -9,7 +9,7 @@
 .method { display:grid; grid-template-columns:1fr 1fr; gap:60px; border-bottom:1px solid var(--line); } .method h2 { margin-bottom:0; } .method-copy { padding-top:44px; max-width:470px; } .method-copy p { color:var(--soft); line-height:1.55; font-size:17px; margin-bottom:30px; }
 .integrations { background:#ece7dc; } .integration-grid { margin-top:62px; display:grid; grid-template-columns:repeat(4,1fr); gap:14px; } .integration-grid>div { background:var(--paper); padding:22px; min-height:230px; display:flex; flex-direction:column; } .integration-grid h3 { margin:25px 0 8px; } .integration-grid p { color:var(--soft); font-size:14px; line-height:1.45; margin:0; } .integration-icon { display:grid; place-items:center; height:39px; width:39px; border-radius:11px; color:#fff; font-size:14px; font-weight:700; } .strava { background:#fc4c02; } .health { background:#ec4d61; } .garmin { background:#008ec4; } .tp { background:#121212; font-size:10px; } .disclosure { max-width:600px; color:var(--soft); font-size:12px; line-height:1.5; margin:28px 0 0; }
 .cta { color:#f8f5ed; background:radial-gradient(circle at 82% 20%,rgba(214,100,46,.7),transparent 26%),#0a0a0c; } .cta h2 { margin-bottom:42px; } footer { min-height:310px; padding:65px max(24px,calc((100vw - 1220px)/2)) 30px; background:#111113; color:#eeebe4; display:grid; grid-template-columns:2fr 1fr 1fr; gap:30px; position:relative; } footer .wordmark { margin-bottom:17px; } .footer-brand>p { color:#aaa69d; } footer>div:not(.footer-brand) { display:flex; flex-direction:column; gap:10px; font-size:14px; } .footer-label { color:#8d8a83; margin:0 0 6px; } footer a:hover { color:var(--lime); } .copyright { position:absolute; bottom:24px; left:max(24px,calc((100vw - 1220px)/2)); color:#79766f; font-size:11px; }
-.document-page { background:var(--paper); } .document-page .site-header { position:relative; color:var(--ink); border-bottom:1px solid var(--line); } .document-page .header-cta { border-color:var(--ink); } .document { max-width:940px; padding-top:110px; padding-bottom:130px; } .document h1 { font-size:clamp(55px,8vw,112px); max-width:900px; } .document .intro { font-size:21px; color:var(--soft); max-width:650px; line-height:1.45; margin-bottom:80px; } .document h2 { font-size:30px; margin:52px 0 15px; letter-spacing:-.045em; } .document main>p:not(.eyebrow):not(.intro) { max-width:680px; color:#3f3d38; font-size:17px; line-height:1.6; } .document-page footer { min-height:110px; display:block; padding-top:35px; } .document-page .copyright { position:static; }
+.document-page { background:var(--paper); } .document-page .site-header { position:relative; color:var(--ink); border-bottom:1px solid var(--line); } .document-page .header-cta { border-color:var(--ink); } .document { max-width:940px; padding-top:110px; padding-bottom:130px; } .document h1 { font-size:clamp(55px,8vw,112px); max-width:900px; } .document .intro { font-size:21px; color:var(--soft); max-width:650px; line-height:1.45; margin-bottom:80px; } .document h2 { font-size:30px; margin:52px 0 15px; letter-spacing:-.045em; } .document>p:not(.eyebrow):not(.intro) { max-width:680px; color:#3f3d38; font-size:17px; line-height:1.6; } .document-page footer { min-height:110px; display:block; padding-top:35px; } .document-page .copyright { position:static; }
 @media (max-width:800px) { nav { display:none; } .hero { min-height:800px; padding-top:145px; } .hero-orbit { transform:scale(.75); transform-origin:bottom right; right:-75px; bottom:-5px; } .feature-grid,.integration-grid { grid-template-columns:1fr; gap:35px; } .feature-grid article { display:grid; grid-template-columns:70px 1fr; column-gap:10px; } .feature-grid h3 { margin:0; } .feature-grid p { grid-column:2; margin:12px 0 0; } .section-heading,.method { display:block; } .method-copy { padding-top:0; } .week-board { overflow-x:auto; grid-template-columns:repeat(7,112px); margin-right:-24px; } .day { min-height:170px; } .integration-grid>div { min-height:0; } footer { grid-template-columns:1fr 1fr; padding-bottom:85px; } .footer-brand { grid-column:1/-1; } }
 @media (max-width:480px) { .header-cta { padding:8px 11px; } h1 { letter-spacing:-.08em; } .hero-copy { font-size:17px; max-width:330px; } .hero-actions { flex-direction:column; align-items:flex-start; gap:20px; } .hero-orbit { transform:scale(.58); right:-115px; bottom:-60px; } h2 { font-size:43px; } }
 
@@ -33,3 +33,51 @@
 .billing-manage { margin-top:28px; border:0; background:transparent; padding:0; cursor:pointer; color:var(--ink); }.billing-note { max-width:550px; margin-top:32px; color:var(--soft); font-size:13px; line-height:1.5; }
 .billing-version { margin-top:12px; color:var(--soft); font:10px "DM Mono",monospace; letter-spacing:.08em; }
 @media (max-width:800px) { .billing-page { padding-top:130px; }.billing-form,.billing-plans { grid-template-columns:1fr; max-width:420px; }.billing-form .button { width:max-content; } }
+
+/* Public pages share readable controls and a reachable coach entry on phones. */
+:focus-visible { outline:3px solid #236db7; outline-offset:4px; }
+html { scroll-padding-top:24px; }
+.skip-link { position:fixed; top:12px; left:12px; z-index:20; padding:12px 18px; background:var(--paper); color:var(--ink); border-radius:8px; transform:translateY(-160%); }
+.skip-link:focus { transform:translateY(0); }
+.site-mobile-nav { display:none; }
+.site-header { gap:16px; }
+.site-header a,.site-mobile-nav summary { min-height:44px; display:inline-flex; align-items:center; }
+.hero h1 { font-size:clamp(3.5rem,8vw,6rem); line-height:1.02; letter-spacing:-.04em; }
+.hero-card-top,.eyebrow,.number,.footer-label,.day span,.copyright,.billing-form label,.billing-version { font-size:12px; }
+.hero-card-top { letter-spacing:0; }
+.hero-card { backdrop-filter:none; background:#1a1a1d; }
+.hero-actions { position:relative; z-index:1; }
+.document { max-width:940px; margin-inline:auto; padding-inline:clamp(24px,5vw,56px); }
+.document h1 { font-size:clamp(3rem,7vw,6rem); line-height:1.04; letter-spacing:-.04em; }
+.document h2 { line-height:1.25; }
+.document>p:not(.eyebrow):not(.intro) { max-width:70ch; font-size:17px; line-height:1.7; }
+.billing-page { padding-inline:clamp(24px,5vw,56px); }
+.billing-page h1 { font-size:clamp(3rem,7vw,6rem); line-height:1.04; letter-spacing:-.04em; }
+.billing-form label { letter-spacing:0; color:#514f49; line-height:1.5; }
+.billing-social .button,.billing-form .button { background:#171719; color:#fff; min-height:48px; border-radius:8px; }
+.billing-form input { min-width:0; width:100%; }
+.billing-note,.billing-version { line-height:1.6; }
+.billing-manage,.billing-sign-out { min-height:44px; }
+.document-page footer a { display:inline-flex; align-items:center; min-height:44px; }
+.copyright { color:#b5b0a6; }
+@media(max-width:800px) {
+  .site-header { padding-inline:16px; gap:8px; }
+  .wordmark { font-size:11px; letter-spacing:.12em; gap:8px; }
+  .brand-logo { width:26px; height:26px; }
+  .header-cta { font-size:12px; padding:8px 10px; }
+  .site-mobile-nav { display:block; position:relative; margin-left:auto; order:1; }
+  .site-mobile-nav summary { cursor:pointer; padding:8px 10px; border:1px solid currentColor; border-radius:8px; font-size:13px; list-style:none; }
+  .site-mobile-nav summary::-webkit-details-marker { display:none; }
+  .site-mobile-nav nav { display:flex; flex-direction:column; gap:0; position:absolute; right:0; top:52px; min-width:230px; padding:8px; border:1px solid #d9d3c8; border-radius:10px; background:var(--paper); color:var(--ink); box-shadow:0 10px 28px #0002; }
+  .site-mobile-nav a { padding:10px 12px; font-size:14px; border-radius:5px; }
+  .site-mobile-nav a:hover { background:#e8e2d7; opacity:1; }
+  .hero { padding-top:140px; }
+  .hero-orbit { pointer-events:none; }
+  .document { padding-block:64px 80px; }
+  .document .intro { margin-bottom:44px; font-size:19px; line-height:1.6; }
+  .document h2 { font-size:26px; letter-spacing:-.025em; }
+  .billing-page { padding-top:120px; }
+  .billing-page .lede { font-size:17px; line-height:1.6; }
+  .billing-sign-out { margin:16px 0 0; }
+}
+@media(prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } *,*::before,*::after { animation:none!important; transition:none!important; } }

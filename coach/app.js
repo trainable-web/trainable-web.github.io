@@ -24,6 +24,22 @@ const currentWeek = () => { const d = new Date(); d.setHours(12, 0, 0, 0); d.set
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let viewVisit = 0;
 let lastMotionKey = '';
+function animateCount(root) {
+  if (reduceMotion.matches) return;
+  root.querySelectorAll('[data-count]').forEach((node) => {
+    const target = Number(node.dataset.count);
+    if (!Number.isFinite(target) || target === 0) return;
+    const start = performance.now(), original = node.textContent;
+    const tick = (now) => {
+      if (!node.isConnected) return;
+      const progress = Math.min(1, (now - start) / 300);
+      node.textContent = String(Math.round(target * (1 - (1 - progress) ** 3)));
+      if (progress < 1) requestAnimationFrame(tick);
+      else node.textContent = original;
+    };
+    requestAnimationFrame(tick);
+  });
+}
 function animateEntry(root, key) {
   if (!root || reduceMotion.matches || lastMotionKey === key) return;
   lastMotionKey = key;
@@ -31,6 +47,7 @@ function animateEntry(root, key) {
   void root.offsetWidth;
   root.dataset.motionKey = key;
   root.classList.add('view-enter');
+  animateCount(root);
   setTimeout(() => {
     if (root.dataset.motionKey === key) root.classList.remove('view-enter');
   }, 360);
@@ -128,7 +145,7 @@ function showAuth(message = '') {
 }
 function showWorkspace(email) {
   $('#auth-page').hidden = true; $('#workspace').hidden = false; $('#sign-out').hidden = false;
-  $('#retry-workspace').hidden = true; $('#account-name').textContent = email || ''; $('#account-avatar').textContent = (email || 'Coach').slice(0, 2).toUpperCase();
+  $('#retry-workspace').hidden = true; $('#account-name').textContent = email || '';
   applyCoachPrefs();
 }
 function showFieldError(id, message) {
@@ -179,14 +196,17 @@ async function loadWorkspace() {
   refreshAttentionBadge();
 }
 function setWorkspaceView(view) {
-  if ($('#workspace').dataset.view !== view) viewVisit++;
+  const viewChanged = $('#workspace').dataset.view !== view;
+  if (viewChanged) { viewVisit++; window.scrollTo(0,0); }
   $('#workspace').dataset.view = view;
-  $('#workspace-title').textContent = { athletes: 'Athletes', attention: 'Review desk', devices: 'Connections', settings: 'Settings' }[view];
+  closeMobileNavigation();
+  document.title = `${{athletes:'Athletes',attention:'Overview',devices:'Connections',settings:'Settings'}[view]} · Trainable Coach`;
+  $('#workspace-title').textContent = { athletes: 'Athletes', attention: 'Overview', devices: 'Connections', settings: 'Settings' }[view];
   $('#workspace-subtitle').textContent = { athletes: 'Find an athlete, review training, and plan the next session.', attention: 'Your roster, decisions and recorded training in one place.', devices: 'Manage the training data shared with Trainable.', settings: 'Make this workspace work for you.' }[view];
-  $('#studio-location').textContent = { athletes: 'Your team', attention: 'Training desk', devices: 'Connections', settings: 'Settings' }[view];
   $('#attention-view').hidden = view !== 'attention';
   $('#devices-view').hidden = view !== 'devices';
   $('#settings-view').hidden = view !== 'settings';
+  if (viewChanged) $('#workspace-title').focus({preventScroll:true});
   $('.split-pane').hidden = view !== 'athletes';
   $('#show-attention').setAttribute('aria-current', view === 'attention' ? 'page' : 'false');
   $('#show-athletes').setAttribute('aria-current', view === 'athletes' ? 'page' : 'false');
@@ -201,11 +221,12 @@ function applyCoachPrefs() {
   const prefs = readCoachPrefs();
   document.body.classList.toggle('nav-compact', Boolean(prefs.compactNav));
   document.body.classList.toggle('chart-points', Boolean(prefs.chartPoints));
-  document.body.classList.toggle('focus-analysis', Boolean(prefs.analysisFocus));
   $('#collapse-nav').setAttribute('aria-expanded', String(!prefs.compactNav));
   $('#collapse-nav').setAttribute('aria-label', prefs.compactNav ? 'Expand navigation' : 'Collapse navigation');
-  $('#collapse-nav').title = prefs.compactNav ? 'Expand navigation' : 'Collapse navigation';
-  $('#collapse-nav').textContent = prefs.compactNav ? '›' : '‹';
+  $('#collapse-nav').removeAttribute('title');
+  $('#collapse-nav').innerHTML = '<svg class="nav-icon" aria-hidden="true"><use href="#icon-chevron"/></svg><span class="nav-collapse-tooltip" role="tooltip">' + (prefs.compactNav ? 'Expand navigation' : 'Collapse navigation') + '</span>';
+  $('#collapse-nav').classList.toggle('is-collapsed',Boolean(prefs.compactNav));
+  document.querySelectorAll('.workspace-nav-item').forEach((button) => { button.setAttribute('aria-label',button.querySelector('span')?.textContent || button.id); });
   $('#setting-compact-nav').checked = Boolean(prefs.compactNav);
   $('#setting-chart-points').checked = Boolean(prefs.chartPoints);
 }
@@ -221,62 +242,17 @@ function renderSidebarRoster() {
   const count = state.attention?.items.filter((item) => !item.reviewed_at && item.priority === 'review').length || 0;
   $('#athletes-badge').hidden = !count; $('#athletes-badge').textContent = String(count);
 }
-const rosterInsights = new Map();
-let insightWorkers = 0;
-const insightQueue = [];
-function queueRosterInsights(people) {
-  for (const p of people) if (!rosterInsights.has(p.id)) { rosterInsights.set(p.id, { loading:true }); insightQueue.push(p.id); }
-  while (insightWorkers < 3 && insightQueue.length) {
-    const id = insightQueue.shift(); insightWorkers++;
-    const owner = session()?.user?.id;
-    const to = utcDay(new Date()), from = shiftUTC(to,-27);
-    Promise.all([portal('read_athlete',{athlete_id:id}),portal('athlete_trends',{athlete_id:id,from,to})]).then(([detail,trends]) => {
-      if (session()?.user?.id !== owner || !state.roster.some((p) => p.id === id)) return;
-      rosterInsights.set(id,{detail,trends});
-    }).catch(() => { if (session()?.user?.id === owner) rosterInsights.set(id,{error:true}); }).finally(() => {
-      insightWorkers--; if (session()?.user?.id !== owner) return;
-      renderDashboardAthletes(); renderRoster(); queueRosterInsights([]);
-    });
-  }
-}
-function rosterSparkline(rows,key,color) {
-  const values=(rows || []).filter((r)=>r[key]!=null && Number.isFinite(Number(r[key])));
-  if(values.length<2) return '';
-  const min=Math.min(...values.map(r=>Number(r[key]))),max=Math.max(...values.map(r=>Number(r[key])));
-  const start=Date.parse(values[0].metric_date),end=Date.parse(values.at(-1).metric_date);
-  let previous=null;
-  const d=values.map((r)=>{ const time=Date.parse(r.metric_date),cmd=previous==null || time-previous>129600000?'M':'L'; previous=time; return `${cmd}${2+(time-start)/(end-start||1)*96},${25-(Number(r[key])-min)/(max-min||1)*21}`; }).join(' ');
-  return `<svg class="roster-spark" viewBox="0 0 100 30" role="img" aria-label="${safe(key.toUpperCase())} recorded trend"><path d="${d}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
-}
-function rosterLoadMarkup(id) {
-  const insight=rosterInsights.get(id);
-  if(!insight || insight.loading) return '<span class="roster-loading">Loading training…</span>';
-  if(insight.error) return '<span class="roster-loading">Data unavailable · refresh overview to retry</span>';
-  const m=insight.detail.metrics;
-  return `<div class="roster-load">${[['ctl','Fitness','#3978e8'],['atl','Fatigue','#a176d5'],['tsb','Form','#2c987c']].map(([key,label,color])=>`<div><span>${label}</span><strong>${numberLabel(m?.[key],'',0)}</strong>${rosterSparkline(insight.trends.load,key,color)}</div>`).join('')}</div><small class="roster-updated">${m?.metric_date ? 'Load · '+safe(dateLabel(m.metric_date)) : 'No load recorded'}</small>`;
-}
-function rosterVolumeMarkup(id, interactive = true) {
-  const insight=rosterInsights.get(id);
-  if(!insight || insight.loading) return '<span class="roster-loading">Loading…</span>';
-  if(insight.error) return '<span class="roster-loading">Unavailable</span>';
-  const to=utcDay(new Date()),from=shiftUTC(to,-6);
-  const rides=(insight.trends.activities || []).filter((a)=>utcDay(a.start_date)>=from && utcDay(a.start_date)<=to);
-  const hours=rides.reduce((n,a)=>n+(Number(a.duration_s)||0),0)/3600;
-  const days=Array.from({length:7},(_,i)=>{const date=shiftUTC(from,i);return {date,min:rides.filter(a=>utcDay(a.start_date)===date).reduce((n,a)=>n+(Number(a.duration_s)||0),0)/60};});
-  const max=Math.max(60,...days.map(d=>d.min));
-  return `<div class="roster-volume"><strong>${numberLabel(hours,' h',1)}</strong><small>${rides.length} activities</small><div class="roster-week-bars" aria-label="Recorded minutes in the past seven days">${days.map(d=>`<span ${interactive ? 'tabindex="0"' : ''} title="${safe(dateLabel(d.date))}: ${Math.round(d.min)} minutes" aria-label="${safe(utcLabel(d.date))}: ${Math.round(d.min)} minutes" style="--height:${Math.max(3,d.min/max*100)}%"><i></i><span class="bar-tip">${safe(dateLabel(d.date))} · ${Math.round(d.min)} min</span></span>`).join('')}</div></div>`;
-}
 function renderDashboardAthletes() {
   const node = $('#dashboard-athlete-list');
-  const people=state.roster.slice().sort((a,b)=>(a.display_name||'').localeCompare(b.display_name||'')).slice(0,8);
-  node.innerHTML = people.length ? people.map((p) => {
+  node.innerHTML = state.roster.length ? state.roster.slice().sort((a,b) => (a.display_name || '').localeCompare(b.display_name || '')).map((p) => {
     const name = p.display_name || (p.is_self ? 'Your training' : 'Athlete');
     const initials = name.trim().split(/\s+/).slice(0,2).map((part) => part[0]?.toUpperCase() || '').join('');
-    const review = (state.attention?.items || []).filter((item) => item.athlete_id === p.id && !item.reviewed_at && item.priority === 'review');
-    return `<article class="dashboard-athlete"><div class="dashboard-athlete-main"><span class="roster-avatar" aria-hidden="true">${safe(initials)}</span><div><button type="button" class="athlete-name-link" data-dashboard-athlete="${safe(p.id)}">${safe(name)}</button><p>${safe(title(p.primary_sport || 'Training'))}</p>${review.length ? `<span class="dashboard-alert">${review.length} to review</span>` : ''}</div></div><div>${rosterLoadMarkup(p.id)}</div>${rosterVolumeMarkup(p.id)}<div class="dashboard-athlete-actions"><button type="button" class="quiet" data-dashboard-athlete="${safe(p.id)}">Open calendar</button><button type="button" class="secondary" data-dashboard-analysis="${safe(p.id)}">Analyze training</button></div></article>`;
-  }).join('') : '<div class="attention-empty"><strong>Connect your first athlete</strong><p>Their training, load and review items will appear here.</p><button type="button" class="secondary" data-attention-athletes>Connect athlete</button></div>';
+    const open = state.attention?.items.filter((item) => item.athlete_id === p.id && !item.reviewed_at) || [];
+    const review = open.filter((item) => item.priority === 'review');
+    const next = open[0];
+    return `<article class="dashboard-athlete"><div class="dashboard-athlete-main"><span class="roster-avatar" aria-hidden="true">${safe(initials)}</span><div><h4>${safe(name)}</h4><p>${safe(title(p.primary_sport || 'Training'))}</p></div></div><div class="dashboard-athlete-status">${review.length ? `<span class="dashboard-alert">${review.length} to review</span>` : '<span class="dashboard-clear">No urgent review</span>'}<small>${next ? safe(next.headline) : 'Open training data and plan'}</small></div><div class="dashboard-athlete-actions"><button type="button" class="secondary" data-dashboard-athlete="${safe(p.id)}">Open athlete</button><button type="button" class="quiet" data-dashboard-analysis="${safe(p.id)}">View data</button></div></article>`;
+  }).join('') : '<div class="attention-empty"><strong>No athletes connected</strong><p>Connect an athlete to see their training and decisions here.</p><button type="button" class="secondary" data-attention-athletes>Connect athlete</button></div>';
   renderSidebarRoster();
-  queueRosterInsights(people);
 }
 async function showDevices() {
   state.mobileDetailOpen = false; $('#workspace').classList.remove('mobile-detail-open');
@@ -360,7 +336,7 @@ async function refreshAttentionBadge() {
     const count = state.attention.items.filter((item) => !item.reviewed_at && item.priority === 'review').length;
     const badge = $('#attention-badge');
     badge.hidden = count === 0; badge.textContent = String(count);
-    $('#show-attention').setAttribute('aria-label', count ? `Dashboard, ${count} reviews need attention` : 'Dashboard');
+    $('#show-attention').setAttribute('aria-label', count ? `Overview, ${count} reviews need attention` : 'Overview');
     renderSidebarRoster(); renderDashboardAthletes();
     if ($('#workspace').dataset.view === 'attention') renderAttention();
   } catch { /* The review queue remains available through its normal refresh action. */ }
@@ -412,12 +388,12 @@ function renderAttention() {
   const open = data.items.filter((item) => !item.reviewed_at);
   const review = open.filter((item) => item.priority === 'review');
   const next = open[0];
-  $('#attention-title').textContent = 'Your training desk.';
+  $('#attention-title').textContent = 'Your athletes, at a glance';
   $('#attention-intro').textContent = next ? `${review.length} review${review.length === 1 ? '' : 's'} need a decision. Start with ${next.athlete_name}.` : 'No open items in the available data. Open an athlete to inspect training or build a plan.';
   $('#open-next-attention').hidden = !next;
   $('#open-next-attention').textContent = next?.priority === 'planning' ? 'Open next plan' : 'Open next athlete';
   const badge = $('#attention-badge'); badge.hidden = review.length === 0; badge.textContent = String(review.length);
-  $('#show-attention').setAttribute('aria-label', review.length ? `Dashboard, ${review.length} reviews need attention` : 'Dashboard');
+  $('#show-attention').setAttribute('aria-label', review.length ? `Overview, ${review.length} reviews need attention` : 'Overview');
   renderDashboardAthletes();
   const planning = open.filter((item) => item.priority === 'planning');
   const gaps = open.filter((item) => item.priority === 'data');
@@ -446,15 +422,9 @@ function renderRoster() {
   const sports = [...new Set(state.roster.map((p) => p.primary_sport || 'training'))].sort();
   $('#roster-sport').innerHTML = '<option value="">All sports</option>' + sports.map((value) => `<option value="${safe(value)}" ${value === sport ? 'selected' : ''}>${safe(title(value))}</option>`).join('');
   const filtered = state.roster.filter((p) => (p.display_name || (p.is_self ? 'Your training' : 'Athlete')).toLocaleLowerCase().includes(query) && (!sport || (p.primary_sport || 'training') === sport)).sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
-  const order = $('#roster-sort').value;
-  const priority = (p) => (state.attention?.items || []).filter(item=>item.athlete_id===p.id && !item.reviewed_at).length;
-  const recentVolume = (p) => (rosterInsights.get(p.id)?.trends?.activities || []).filter(a=>utcDay(a.start_date)>=shiftUTC(utcDay(new Date()),-6) && utcDay(a.start_date)<=utcDay(new Date())).reduce((n,a)=>n+(Number(a.duration_s)||0),0);
-  if(order==='attention') filtered.sort((a,b)=>priority(b)-priority(a));
-  if(order==='volume') filtered.sort((a,b)=>recentVolume(b)-recentVolume(a));
   const pages = Math.max(1, Math.ceil(filtered.length / 12));
   state.rosterPage = Math.min(state.rosterPage || 0, pages - 1);
   const page = filtered.slice(state.rosterPage * 12, (state.rosterPage + 1) * 12);
-  queueRosterInsights(page);
   $('#roster-count').textContent = `${state.roster.length} ${state.roster.length === 1 ? 'athlete' : 'athletes'}`;
   $('#roster-range').textContent = filtered.length ? `Showing ${state.rosterPage * 12 + 1}–${Math.min(filtered.length, (state.rosterPage + 1) * 12)} of ${filtered.length}` : 'Showing 0 athletes';
   document.querySelector('[data-roster-page="-1"]').disabled = state.rosterPage === 0;
@@ -463,7 +433,7 @@ function renderRoster() {
     const name = p.display_name || (p.is_self ? 'Your training' : 'Athlete');
     const initials = name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || '').join('');
     const reviews = state.attention?.items.filter((item) => item.athlete_id === p.id && !item.reviewed_at && item.priority === 'review').length || 0;
-    return `<button type="button" class="roster-item" data-athlete="${safe(p.id)}" aria-label="Open ${safe(name)} training workspace${reviews ? `, ${reviews} ${reviews === 1 ? 'review' : 'reviews'} need attention` : ''}"><span class="roster-person"><span class="roster-avatar" aria-hidden="true">${safe(initials)}</span><span class="roster-copy"><strong>${safe(name)}</strong><small>${safe(title(p.primary_sport || 'Training'))}${reviews ? ` <em class="roster-alert">${reviews} to review</em>` : ''}</small></span></span><span class="roster-sport">${rosterLoadMarkup(p.id)}</span><span class="roster-access">${rosterVolumeMarkup(p.id,false)}</span><span class="roster-open">Open athlete workspace <span aria-hidden="true">↗</span></span></button>`;
+    return `<button type="button" class="roster-item" data-athlete="${safe(p.id)}" aria-label="Open ${safe(name)} training workspace${reviews ? `, ${reviews} ${reviews === 1 ? 'review' : 'reviews'} need attention` : ''}"><span class="roster-person"><span class="roster-avatar" aria-hidden="true">${safe(initials)}</span><span class="roster-copy"><strong>${safe(name)}</strong><small>${p.is_self ? 'Your training' : 'Athlete'}${reviews ? ` <em class="roster-alert">${reviews} to review</em>` : ''}</small></span></span><span class="roster-sport">${safe(title(p.primary_sport || 'training'))}</span><span class="roster-access">${p.is_self ? 'Your account' : 'Coach access'}</span><span class="roster-open">Open <span aria-hidden="true">↗</span></span></button>`;
   }).join('') : `<div class="roster-empty"><strong>${state.roster.length ? 'No athletes found' : 'No athletes connected yet'}</strong><p>${state.roster.length ? 'Try another name or clear your filters.' : 'Connect an athlete to begin planning and reviewing training.'}</p><button type="button" class="secondary small-button" data-clear-roster>${state.roster.length ? 'Clear filters' : 'Connect an athlete'}</button></div>`;
 }
 async function selectAthlete(id, options = {}) {
@@ -494,9 +464,9 @@ function renderAthlete() {
   const name = p.display_name || (isSelf ? 'Your training' : 'Athlete');
   const metrics = data.metrics;
   const cells = [
-    ['Fitness', metrics?.ctl == null ? '—' : Math.round(metrics.ctl), 'Modeled CTL · 42-day load'],
-    ['Fatigue', metrics?.atl == null ? '—' : Math.round(metrics.atl), 'Modeled ATL · 7-day load'],
-    ['Form', metrics?.tsb == null ? '—' : Math.round(metrics.tsb), 'Modeled TSB · fitness − fatigue'],
+    ['Fitness', metrics?.ctl == null ? '—' : Math.round(metrics.ctl), 'CTL · 42-day load'],
+    ['Fatigue', metrics?.atl == null ? '—' : Math.round(metrics.atl), 'ATL · 7-day load'],
+    ['Form', metrics?.tsb == null ? '—' : Math.round(metrics.tsb), 'TSB · fitness − fatigue'],
     ['FTP', data.zones?.ftp_watts ? Math.round(data.zones.ftp_watts) + ' W' : '—', 'Cycling threshold'],
     ['Energy', data.readiness?.checkin_energy != null ? data.readiness.checkin_energy + ' / 5' : '—', data.readiness?.checkin_energy != null ? 'Athlete report · ' + dateLabel(data.readiness.metric_date) : 'No energy report'],
   ];
@@ -504,19 +474,19 @@ function renderAthlete() {
   const noteKinds = { observation: 'Training response', preference: 'Preference', goal: 'Goal', constraint: 'Constraint' };
   const noteRows = data.coach_notes?.length ? data.coach_notes.map((n) => `<div class="note-row"><div><small>${safe(noteKinds[n.kind] || 'Note')} · ${n.author_id === state.athleteId ? 'Athlete' : 'Coach'} · ${n.visibility === 'coach_private' ? 'Only you' : 'Shared'} · ${safe(dateLabel(n.created_at))}</small><p>${safe(n.body)}</p></div>${isSelf || n.author_id === session()?.user?.id ? `<button type="button" class="quiet small-button" data-archive-note="${safe(n.id)}">Archive</button>` : ''}</div>`).join('') : '<div class="list-empty"><strong>No athlete notes yet</strong><p>Add a training response, goal or preference so the assistant can consider it when drafting.</p><button type="button" class="secondary small-button" data-action="new-note">Add athlete note</button></div>';
   const section = state.athleteSection;
+  document.title = `${name} · ${{calendar:'Calendar',analysis:'Training analysis',season:'Season',library:'Workout library',profile:'Profile & zones',notes:'Notes & calls',tools:'Coaching tools'}[section]} · Trainable Coach`;
   $('#athlete-pane').innerHTML = `
     <button type="button" class="mobile-back quiet" data-action="back-to-roster">← All athletes</button>
-    <header class="athlete-top"><div class="athlete-identity"><span class="athlete-monogram" aria-hidden="true">${safe(name.trim().split(/\s+/).slice(0,2).map(part=>part[0]).join(''))}</span><div><p class="eyebrow">${safe(title(p.primary_sport || 'Training'))} / ${isSelf ? 'Your training' : 'Athlete workspace'}</p><h1>${safe(name)}</h1></div></div><div class="athlete-actions"><button type="button" class="secondary ai-action" data-action="review-week">Review with AI</button>${week >= currentWeek() ? `<button type="button" class="secondary" data-action="new-workout">+ Workout</button><button type="button" class="primary" data-action="build-week">Plan the week ↗</button>` : '<button type="button" class="secondary" data-action="this-week">Go to this week</button>'}</div></header>
-<section class="athlete-metric-band" aria-label="Athlete at a glance"><div class="metrics" aria-label="Athlete training measures">${cells.map((c) => `<div class="metric" data-metric="${safe(c[0].toLowerCase())}"><div><span>${safe(c[0])}</span><strong>${safe(c[1])}</strong></div><small>${safe(c[2])}</small>${['Fitness','Fatigue','Form'].includes(c[0])?rosterSparkline(rosterInsights.get(state.athleteId)?.trends?.load || [],{Fitness:'ctl',Fatigue:'atl',Form:'tsb'}[c[0]],{Fitness:'#3978e8',Fatigue:'#a176d5',Form:'#2c987c'}[c[0]]):''}</div>`).join('')}</div></section><p class="athlete-metric-caption">${metrics?.metric_date ? 'Load recorded · ' + safe(utcLabel(metrics.metric_date)) : 'No training-load record available'}. Modeled load supports the coach’s judgment.</p>
-    <div class="athlete-section-nav" role="group" aria-label="Athlete view">${[['calendar','Schedule'],['analysis','Analysis'],['season','Season'],['library','Workout library'],['profile','Athlete profile'],['notes','Coach notes'],['tools','AI & tools']].map(([value,label]) => `<button type="button" data-athlete-section="${value}" aria-pressed="${section === value}">${label}</button>`).join('')}</div>
-    <div class="athlete-studio-grid" data-section="${section}"><div class="athlete-studio-main">
+    <header class="athlete-top"><div class="athlete-identity"><h2>${safe(name)}</h2><p>${safe(title(p.primary_sport || 'Training'))}${isSelf ? ' · Your training' : ' · Athlete'}</p></div><div class="metrics" aria-label="Athlete training measures">${cells.map((c) => `<div class="metric"><span>${safe(c[0])}</span><strong data-count="${safe(c[1])}">${safe(c[1])}</strong><small>${safe(c[2])}</small></div>`).join('')}</div><div class="athlete-actions">${week >= currentWeek() ? `<button type="button" class="primary" data-action="new-workout">Add workout</button><button type="button" class="secondary" data-action="build-week">Plan week</button>` : '<button type="button" class="secondary" data-action="this-week">Go to this week</button>'}</div></header>
+
+    <details class="load-disclosure"><summary>Training load · ${metrics?.metric_date ? safe(dateLabel(metrics.metric_date)) : 'No record'}</summary><p class="load-timestamp">${metrics?.metric_date ? 'Training load last recorded: ' + safe(utcLabel(metrics.metric_date)) : 'No training-load record available.'} Fitness (CTL) follows a 42-day load model; fatigue (ATL) follows a 7-day model. Form (TSB) is their difference at the start of each day. Modeled load may include estimates; review the recorded training before planning.</p></details><div class="athlete-section-nav" role="group" aria-label="Athlete view">${[['calendar','Calendar'],['analysis','Training analysis'],['season','Season'],['library','Workout library'],['profile','Profile & zones'],['notes','Notes & calls'],['tools','Tools']].map(([value,label]) => `<button type="button" data-athlete-section="${value}" aria-pressed="${section === value}">${label}</button>`).join('')}</div>
     <section class="week-section" ${section !== 'calendar' ? 'hidden' : ''}>${state.calendarLayout === 'month' ? renderMonthCalendar(week) : renderCalendar(week, workouts)}</section>
     <section class="analysis-section" ${section !== 'analysis' ? 'hidden' : ''}>${section === 'analysis' ? analysisMarkup() : ''}</section>
     <section class="season-section" ${section !== 'season' ? 'hidden' : ''}>${section === 'season' ? seasonMarkup() : ''}</section>
     <section class="library-section" ${section !== 'library' ? 'hidden' : ''}>${section === 'library' ? libraryMarkup() : ''}</section>
     <section ${section !== 'profile' ? 'hidden' : ''}>${section === 'profile' ? profileMarkup() : ''}</section>
     <section ${section !== 'tools' ? 'hidden' : ''}><h3>Coaching tools</h3><p class="helper">Choose the task you need. AI suggestions are always reviewed before saving.</p><div class="coaching-tools">${[['new-workout','Create workout','Set the title, instructions and training blocks yourself.'],['ai-workout','Draft workout with AI','Describe a session, then review and edit the proposed blocks.'],['build-week','Build or edit a week','Plan this week or next week and review before publishing.'],['review-week','Review this week with AI','Ask for one session adjustment using the athlete’s current context.'],['new-note','Add athlete note','Record training response, goals, preferences or constraints.'],['new-meeting','Log coach call','Save call notes and agreed changes; transcript assistance is optional.']].map(([action,label,description]) => `<button type="button" class="secondary" data-action="${action}"><strong>${label}</strong><span>${description}</span></button>`).join('')}</div></section>
-    <div class="context-column" ${section !== 'notes' ? 'hidden' : ''}><section class="profile-notes"><div class="section-head"><h3>Athlete notes</h3><button type="button" class="secondary" data-action="new-note">Add note</button></div><div class="meeting-list">${noteRows}</div></section><section class="calls-section"><div class="section-head"><h3>Coach calls</h3><button type="button" class="secondary" data-action="new-meeting">Add call notes</button></div><div class="meeting-list">${meetingRows}</div></section></div></div></div>`;
+    <div class="context-column" ${section !== 'notes' ? 'hidden' : ''}><section class="profile-notes"><div class="section-head"><h3>Athlete notes</h3><button type="button" class="secondary" data-action="new-note">Add note</button></div><div class="meeting-list">${noteRows}</div></section><section class="calls-section"><div class="section-head"><h3>Coach calls</h3><button type="button" class="secondary" data-action="new-meeting">Add call notes</button></div><div class="meeting-list">${meetingRows}</div></section></div>`;
   if (section === 'analysis') paintAnalysis();
   if (section === 'season' && !state.season) loadSeason();
   if (section === 'calendar') {
@@ -636,21 +606,6 @@ function workoutStepZone(step) {
   const ratio = ((Number(step.target_low) || 0) + (Number(step.target_high) || Number(step.target_low) || 0)) / 2 / ftp;
   return ratio < .55 ? 'recovery' : ratio < .76 ? 'endurance' : ratio < .89 ? 'tempo' : ratio < .95 ? 'sweet_spot' : ratio < 1.06 ? 'threshold' : ratio < 1.21 ? 'vo2max' : 'anaerobic';
 }
-function workoutDifficulty(workout) {
-  if (workout.rest || workout.workout_type === 'rest') return ['rest','Rest'];
-  const zones = (workout.blocks || workout.structured_steps || []).filter((s) => !s.type || s.type === 'work').map((s) => s.zone || workoutStepZone(s));
-  const type = String(workout.workout_type || '').toLowerCase();
-  if (zones.some((z) => ['vo2max','anaerobic'].includes(z)) || /vo2|anaerobic|sprint|race/.test(type)) return ['hard','High intensity'];
-  if (zones.some((z) => ['sweet_spot','threshold','tempo'].includes(z)) || /threshold|sweet|tempo|interval/.test(type)) return ['moderate','Tempo / threshold'];
-  if (zones.some((z) => z === 'endurance') || /endurance|aerobic/.test(type)) return ['easy','Endurance'];
-  if (zones.some((z) => z === 'recovery') || /recovery/.test(type)) return ['recovery','Recovery'];
-  return ['open','Open effort'];
-}
-function difficultyLegend() { return '<div class="difficulty-legend" aria-label="Planned workout intensity">' + [['recovery','Recovery'],['easy','Endurance'],['moderate','Tempo / threshold'],['hard','High intensity'],['rest','Rest']].map(([key,label]) => `<span data-difficulty="${key}"><i></i>${label}</span>`).join('') + '</div>'; }
-function completionDial(value,total,label) {
-  const pct = total > 0 ? Math.min(100,Math.max(0,value/total*100)) : 0;
-  return `<div class="completion-dial" style="--dial:${pct}%" role="img" aria-label="${safe(label)}: ${value} of ${total}"><div><strong>${total ? Math.round(value/total*100)+'%' : '—'}</strong><span>${safe(label)}</span></div></div>`;
-}
 function workoutChart(workout) {
   const steps = (workout.structured_steps || []).filter((s) => Number(s.duration_s) > 0);
   if (!steps.length) return '';
@@ -676,12 +631,12 @@ function renderCalendar(week, workouts) {
     const canAdd = editable && date >= today && !items.length;
     return `<div class="calendar-cell ${date === today ? 'is-today' : ''}"><div class="calendar-cell-heading"><span>${DAYS[day]}</span><strong>${Number(date.slice(-2))}</strong>${date === today ? '<small>Today</small>' : ''}</div><div class="calendar-cell-sessions">${items.map((w) => {
       const [status, label] = workoutStatus(w, date); const load = w.target_tss ?? w.computed_tss;
-      return `<button type="button" class="workout-card ${status}" data-difficulty="${workoutDifficulty(w)[0]}" data-workout-preview="${safe(w.id)}"><span class="workout-card-kind">${safe(workoutDifficulty(w)[1])}</span><strong class="workout-card-title">${safe(w.headline || title(w.workout_type))}</strong><span class="workout-card-time">${safe(minutesLabel(w.target_duration_min))}</span>${load != null ? `<small>${Math.round(Number(load))} TSS</small>` : ''}${workoutChart(w)}<span class="workout-card-status">${w.completed ? '✓ ' : ''}${label}</span>${w.prescription_source === 'human_coach' ? '<small class="workout-card-source">Coach prescribed</small>' : ''}</button>`;
+      return `<button type="button" class="workout-card ${status}" data-workout-preview="${safe(w.id)}"><span class="workout-card-kind">${safe(title(w.workout_type || 'Workout'))}</span><strong class="workout-card-title">${safe(w.headline || title(w.workout_type))}</strong><span class="workout-card-time">${safe(minutesLabel(w.target_duration_min))}</span>${load != null ? `<small>${Math.round(Number(load))} TSS</small>` : ''}${workoutChart(w)}<span class="workout-card-status">${w.completed ? '✓ ' : ''}${label}</span>${w.prescription_source === 'human_coach' ? '<small class="workout-card-source">Coach prescribed</small>' : ''}</button>`;
     }).join('')}${actual.map((a) => `<button type="button" class="calendar-activity" data-activity="${safe(a.id)}"><span class="calendar-activity-kind">Recorded · ${safe(title(a.strava_sport_type || a.sport_type))}</span><strong>${safe(a.name || title(a.strava_sport_type || a.sport_type) + ' activity')}</strong><span>${safe(elapsedLabel(a.duration_s))}${a.distance_m != null ? ' · ' + safe(numberLabel(a.distance_m / 1000, ' km', 1)) : ''}</span><small>${a.avg_power != null ? safe(numberLabel(a.avg_power, ' W')) : ''}${a.avg_power != null && a.avg_hr != null ? ' · ' : ''}${a.avg_hr != null ? safe(numberLabel(a.avg_hr, ' bpm')) : ''}</small></button>`).join('')}${!items.length && !actual.length ? `<p class="calendar-empty">${record?.loading ? 'Loading activities…' : date < today ? 'No session recorded' : 'No workout planned'}</p>` : ''}</div>${canAdd ? `<button type="button" class="calendar-add" data-add-calendar-day="${day}" aria-label="Add workout for ${DAYS[day]}, ${safe(dateLabel(date))}">+ Add</button>` : ''}</div>`;
   }).join('');
   return `<div class="calendar-toolbar"><div class="calendar-controls"><button type="button" class="secondary" data-week-shift="-1" aria-label="Previous available week" ${index <= 0 ? 'disabled' : ''}>‹<span class="control-tooltip" role="tooltip">Previous available week</span></button><h3>${safe(dateLabel(week))} – ${safe(dateLabel(end))}<small>${week === currentWeek() ? 'This week' : week === nextWeek() ? 'Next week' : 'Earlier week'}</small></h3><button type="button" class="secondary" data-week-shift="1" aria-label="Next available week" ${index >= weeks.length - 1 ? 'disabled' : ''}>›<span class="control-tooltip" role="tooltip">Next available week</span></button><button type="button" class="quiet" data-action="this-week">Today</button><button type="button" class="quiet" data-calendar-retry>Refresh activities</button></div><div class="calendar-view-switch" role="group" aria-label="Calendar layout"><button type="button" data-calendar-layout="month" aria-pressed="false">Month</button><button type="button" data-calendar-layout="week" aria-pressed="${state.calendarLayout === 'week'}">Week</button><button type="button" data-calendar-layout="agenda" aria-pressed="${state.calendarLayout === 'agenda'}">Agenda</button></div></div>
-    ${state.calendarLayout === 'week' ? '<p class="calendar-scroll-hint">Scroll across the week, or choose Agenda for a list.</p>' : ''}${record?.error ? `<p class="data-warning" role="alert">Activities could not load: ${safe(record.error)} <button type="button" data-calendar-retry>Try again</button></p>` : ''}${record?.limited ? '<p class="data-warning">This week has more than 500 records. Some activities may be missing.</p>' : ''}<div class="calendar-body"><div class="calendar-grid planner-grid ${state.calendarLayout === 'agenda' ? 'agenda' : ''}" role="group" tabindex="0" aria-label="Training week of ${safe(dateLabel(week))}">${days}</div><aside class="calendar-summary" aria-label="Week summary"><h4>Week summary</h4>${completionDial(complete,sessions.length,"Sessions complete")}<div class="summary-duration"><strong>${safe(trainingMinutesLabel(planned))}</strong><span>planned time</span></div><dl><div><dt>Recorded</dt><dd>${record?.loading ? 'Loading…' : safe(trainingMinutesLabel(Math.round(recordedSeconds / 60)))}</dd></div><div><dt>Activities</dt><dd>${record?.loading ? '—' : activities.length}</dd></div><div><dt>Planned TSS</dt><dd>${tssValues.length ? Math.round(tss) : '—'}</dd></div><div><dt>Planned sessions</dt><dd>${sessions.length}</dd></div><div><dt>Marked complete</dt><dd>${complete} / ${sessions.length}</dd></div></dl><progress max="${Math.max(sessions.length, 1)}" value="${complete}" aria-label="${complete} of ${sessions.length} sessions marked complete"></progress><p class="summary-caption">Recorded activities are independent of completion marks. Strava sessions use the activity’s local date when available; older records use your timezone.</p>${week === currentWeek() ? '<button type="button" class="secondary full" data-action="review-week">Suggest a change</button><p class="summary-caption">The assistant suggests one session change for your review.</p>' : editable ? '<p class="summary-caption">Use Plan week to draft and review next week before publishing.</p>' : '<p class="summary-caption">Browse prior weeks for recorded activities.</p>'}</aside></div>
-    ${difficultyLegend()}<div class="calendar-key" aria-label="Workout status key"><span><i class="key-planned"></i>Planned</span><span><i class="key-completed"></i>Marked complete</span><span><i class="key-actual"></i>Recorded activity</span><span>Open an activity for charts and laps.</span></div>`;
+    ${state.calendarLayout === 'week' ? '<p class="calendar-scroll-hint">Scroll across the week, or choose Agenda for a list.</p>' : ''}${record?.error ? `<p class="data-warning" role="alert">Activities could not load: ${safe(record.error)} <button type="button" data-calendar-retry>Try again</button></p>` : ''}${record?.limited ? '<p class="data-warning">This week has more than 500 records. Some activities may be missing.</p>' : ''}<div class="calendar-body"><div class="calendar-grid planner-grid ${state.calendarLayout === 'agenda' ? 'agenda' : ''}" role="group" tabindex="0" aria-label="Training week of ${safe(dateLabel(week))}">${days}</div><aside class="calendar-summary" aria-label="Week summary"><h4>Week summary</h4><div class="summary-duration"><strong>${safe(trainingMinutesLabel(planned))}</strong><span>planned time</span></div><dl><div><dt>Recorded</dt><dd>${record?.loading ? 'Loading…' : safe(trainingMinutesLabel(Math.round(recordedSeconds / 60)))}</dd></div><div><dt>Activities</dt><dd>${record?.loading ? '—' : activities.length}</dd></div><div><dt>Planned TSS</dt><dd>${tssValues.length ? Math.round(tss) : '—'}</dd></div><div><dt>Planned sessions</dt><dd>${sessions.length}</dd></div><div><dt>Marked complete</dt><dd>${complete} / ${sessions.length}</dd></div></dl><progress max="${Math.max(sessions.length, 1)}" value="${complete}" aria-label="${complete} of ${sessions.length} sessions marked complete"></progress><p class="summary-caption">Recorded activities are independent of completion marks. Strava sessions use the activity’s local date when available; older records use your timezone.</p>${week === currentWeek() ? '<button type="button" class="secondary full" data-action="review-week">Suggest a change</button><p class="summary-caption">The assistant suggests one session change for your review.</p>' : editable ? '<p class="summary-caption">Use Plan week to draft and review next week before publishing.</p>' : '<p class="summary-caption">Browse prior weeks for recorded activities.</p>'}</aside></div>
+    <div class="calendar-key" aria-label="Workout status key"><span><i class="key-planned"></i>Planned</span><span><i class="key-completed"></i>Marked complete</span><span><i class="key-actual"></i>Recorded activity</span><span>Open an activity for charts and laps.</span></div>`;
 }
 function renderMonthCalendar() {
   const month = state.calendarMonth, today = localDate(), weeks = monthWeeks(month), plans = state.athlete?.plans || [], workouts = state.athlete?.workouts || [];
@@ -693,13 +648,13 @@ function renderMonthCalendar() {
     const days = ORDER.map((day) => {
       const date = calendarDate(week,day), items = planned.filter((w) => w.day_of_week === day), actual = activities.filter((a) => activityCalendarDay(a) === date);
       const canAdd = (week === currentWeek() || week === nextWeek()) && date >= today && !items.length;
-      return `<div class="month-day ${date.slice(0,7) === month ? '' : 'outside-month'} ${date === today ? 'is-today' : ''}"><div class="month-day-heading"><small class="month-weekday">${DAYS[day]}</small><strong>${Number(date.slice(-2))}</strong>${date === today ? '<span>Today</span>' : ''}</div>${items.map((w) => { const [status] = workoutStatus(w,date); return `<button type="button" class="month-event plan ${status}" data-difficulty="${workoutDifficulty(w)[0]}" data-workout-preview="${safe(w.id)}"><span class="month-event-type">${safe(title(w.workout_type || 'Workout'))} · Plan${w.completed ? ' ✓' : ''}</span><strong>${safe(w.headline || title(w.workout_type))}</strong><small>${safe(minutesLabel(w.target_duration_min))}${w.target_tss == null ? '' : ' · ' + Math.round(Number(w.target_tss)) + ' TSS'}</small>${w.description ? `<span class="month-event-description">${safe(w.description)}</span>` : ''}${workoutChart(w)}</button>`; }).join('')}${actual.map((a) => `<button type="button" class="month-event recorded" data-activity="${safe(a.id)}"><span class="month-event-type">Recorded · ${safe(title(a.strava_sport_type || a.sport_type))}</span><strong>${safe(a.name || title(a.sport_type))}</strong><small>${safe(elapsedLabel(a.duration_s))}${a.distance_m == null ? '' : ' · ' + safe(numberLabel(a.distance_m/1000,' km',1))}</small><small>${a.avg_power == null ? '' : safe(numberLabel(a.avg_power,' W'))}${a.avg_hr == null ? '' : ' · ' + safe(numberLabel(a.avg_hr,' bpm'))}</small></button>`).join('')}${canAdd ? `<button type="button" class="month-add" data-add-calendar-day="${day}" data-add-week="${week}" aria-label="Add workout on ${safe(dateLabel(date))}">+ Add workout</button>` : ''}${!items.length && !actual.length && record?.loading ? '<small class="month-loading">Loading…</small>' : ''}</div>`;
+      return `<div class="month-day ${date.slice(0,7) === month ? '' : 'outside-month'} ${date === today ? 'is-today' : ''}"><div class="month-day-heading"><strong>${Number(date.slice(-2))}</strong>${date === today ? '<span>Today</span>' : ''}</div>${items.map((w) => { const [status] = workoutStatus(w,date); return `<button type="button" class="month-event plan ${status}" data-workout-preview="${safe(w.id)}"><span class="month-event-type">${safe(title(w.workout_type || 'Workout'))} · Plan${w.completed ? ' ✓' : ''}</span><strong>${safe(w.headline || title(w.workout_type))}</strong><small>${safe(minutesLabel(w.target_duration_min))}${w.target_tss == null ? '' : ' · ' + Math.round(Number(w.target_tss)) + ' TSS'}</small>${w.description ? `<span class="month-event-description">${safe(w.description)}</span>` : ''}${workoutChart(w)}</button>`; }).join('')}${actual.map((a) => `<button type="button" class="month-event recorded" data-activity="${safe(a.id)}"><span class="month-event-type">Recorded · ${safe(title(a.strava_sport_type || a.sport_type))}</span><strong>${safe(a.name || title(a.sport_type))}</strong><small>${safe(elapsedLabel(a.duration_s))}${a.distance_m == null ? '' : ' · ' + safe(numberLabel(a.distance_m/1000,' km',1))}</small><small>${a.avg_power == null ? '' : safe(numberLabel(a.avg_power,' W'))}${a.avg_hr == null ? '' : ' · ' + safe(numberLabel(a.avg_hr,' bpm'))}</small></button>`).join('')}${canAdd ? `<button type="button" class="month-add" data-add-calendar-day="${day}" data-add-week="${week}" aria-label="Add workout on ${safe(dateLabel(date))}">+ Add workout</button>` : ''}${!items.length && !actual.length && record?.loading ? '<small class="month-loading">Loading…</small>' : ''}</div>`;
     }).join('');
     const plannedMinutes = planned.reduce((n,w) => n + (Number(w.target_duration_min)||0),0), actualSeconds = activities.reduce((n,a) => n + (Number(a.duration_s)||0),0);
     const plannedTss = planned.reduce((n,w) => n + (Number(w.target_tss ?? w.computed_tss)||0),0);
     return `<div class="month-week" role="row">${days}<aside class="month-week-summary"><strong>${safe(dateLabel(week))}–${safe(dateLabel(calendarDate(week,0)))}</strong><div class="week-volume"><span>Time completion</span><strong>${plannedMinutes ? Math.round(actualSeconds / 60 / plannedMinutes * 100) + '%' : '—'}</strong><progress max="${Math.max(plannedMinutes,actualSeconds/60,1)}" value="${actualSeconds/60}" aria-label="Recorded time against planned time"></progress></div><dl><div><dt>Planned</dt><dd>${safe(trainingMinutesLabel(plannedMinutes))}</dd></div><div><dt>Recorded</dt><dd>${record?.loading ? 'Loading…' : safe(trainingMinutesLabel(Math.round(actualSeconds/60)))}</dd></div><div><dt>Sessions</dt><dd>${activities.length} recorded</dd></div><div><dt>Planned TSS</dt><dd>${plannedTss ? Math.round(plannedTss) : '—'}</dd></div></dl>${record?.error ? `<small role="alert">Activity load failed. <button type="button" data-calendar-retry-week="${safe(week)}">Retry</button></small>` : ''}</aside></div>`;
   }).join('');
-  return `<div class="calendar-toolbar"><div class="calendar-controls"><button type="button" class="secondary" data-month-shift="-1" aria-label="Previous month">‹</button><h3>${safe(monthName)}</h3><button type="button" class="secondary" data-month-shift="1" aria-label="Next month">›</button><button type="button" class="quiet" data-action="this-week">Today</button></div><div class="calendar-view-switch" role="group" aria-label="Calendar layout"><button type="button" data-calendar-layout="month" aria-pressed="true">Month</button><button type="button" data-calendar-layout="week" aria-pressed="false">Week</button><button type="button" data-calendar-layout="agenda" aria-pressed="false">Agenda</button></div></div><div class="month-calendar" role="table" aria-label="${safe(monthName)} training calendar"><div class="month-head" role="row">${ORDER.map((day) => `<span role="columnheader">${DAYS[day]}</span>`).join('')}<span role="columnheader">Week summary</span></div>${rows}</div>${difficultyLegend()}<div class="calendar-key" aria-label="Calendar key"><span><i class="key-planned"></i>Plan</span><span><i class="key-actual"></i>Recorded</span><span><i class="key-completed"></i>Marked complete</span></div>`;
+  return `<div class="calendar-toolbar"><div class="calendar-controls"><button type="button" class="secondary" data-month-shift="-1" aria-label="Previous month">‹</button><h3>${safe(monthName)}</h3><button type="button" class="secondary" data-month-shift="1" aria-label="Next month">›</button><button type="button" class="quiet" data-action="this-week">Today</button></div><div class="calendar-view-switch" role="group" aria-label="Calendar layout"><button type="button" data-calendar-layout="month" aria-pressed="true">Month</button><button type="button" data-calendar-layout="week" aria-pressed="false">Week</button><button type="button" data-calendar-layout="agenda" aria-pressed="false">Agenda</button></div></div><div class="month-calendar" role="table" aria-label="${safe(monthName)} training calendar"><div class="month-head" role="row">${ORDER.map((day) => `<span role="columnheader">${DAYS[day]}</span>`).join('')}<span role="columnheader">Week summary</span></div>${rows}</div><div class="calendar-key" aria-label="Calendar key"><span><i class="key-planned"></i>Plan</span><span><i class="key-actual"></i>Recorded</span><span><i class="key-completed"></i>Marked complete</span></div>`;
 }
 async function loadSeason() {
   const athlete = state.athleteId, request = ++state.seasonRequest, to = utcDay(new Date()), from = shiftUTC(to,-364);
@@ -755,8 +710,7 @@ function templateZoneStrip(blocks) {
   const visible = (blocks || []).filter((block) => Number(block.duration_min) > 0);
   if (!visible.length) return '';
   const label = visible.map((block) => `${ZONES.find(([key]) => key === block.zone)?.[1] || 'Open effort'} ${minutesLabel(block.duration_min)}`).join(', ');
-  const heights={recovery:28,endurance:45,tempo:60,sweet_spot:68,threshold:78,vo2max:90,anaerobic:100,open:40};
-  return `<div class="workout-profile template-profile" role="img" aria-label="Workout structure: ${safe(label)}">${visible.map((block) => `<span data-zone="${safe(block.zone)}" style="flex-grow:${Number(block.duration_min)};height:${heights[block.zone]||40}%" title="${safe(ZONES.find(([key]) => key === block.zone)?.[1] || 'Open effort')}: ${safe(minutesLabel(block.duration_min))}"></span>`).join('')}</div>`;
+  return `<div class="week-zone-strip" role="img" aria-label="Workout structure: ${safe(label)}">${visible.map((block) => `<span data-zone="${safe(block.zone)}" style="flex:${Number(block.duration_min)}" title="${safe(ZONES.find(([key]) => key === block.zone)?.[1] || 'Open effort')}: ${safe(minutesLabel(block.duration_min))}"></span>`).join('')}</div>`;
 }
 function libraryMarkup() {
   const plans = new Map((state.athlete?.plans || []).map((p) => [p.id,p.week_start_date]));
@@ -929,9 +883,9 @@ function weekDayMarkup(day) {
   const label = DAYS[day.day_of_week];
   if (day.locked) return `<article class="week-edit-day locked"><div class="week-edit-heading"><strong>${label}</strong><span>${day.recorded_minutes ? 'Recorded' : 'Preserved'} · ${safe(minutesLabel(weekMinutes(day)))}</span></div><p>${safe((day.existing || []).map((w) => w.headline || title(w.workout_type)).join(' + ') || (day.recorded_minutes ? 'Completed riding' : 'Past day'))}</p><small>Recorded rides, completed sessions, races and existing coach sessions stay in place.</small></article>`;
   const blocks = day.blocks || [];
-  const zones = templateZoneStrip(blocks);
+  const zones = `<div class="week-zone-strip" role="img" aria-label="Workout blocks colored by training zone">${blocks.map((b) => `<span data-zone="${safe(b.zone)}" style="flex:${Number(b.duration_min) || 1}" title="${safe(ZONES.find(([key]) => key === b.zone)?.[1] || 'Open effort')}: ${safe(minutesLabel(b.duration_min))}"></span>`).join('')}</div>`;
   const movable = (state.weekDraft?.days || []).filter((d) => !d.locked && d.day_of_week !== day.day_of_week);
-  return `<article class="week-edit-day" data-difficulty="${workoutDifficulty(day)[0]}" data-week-day="${day.day_of_week}" draggable="true"><div class="week-edit-heading"><strong>${label}</strong><span>${safe(minutesLabel(weekMinutes(day)))}</span></div>${day.rest ? '' : zones}<div class="week-day-choice"><label for="week-mode-${day.day_of_week}">Plan for ${label}</label><select id="week-mode-${day.day_of_week}" data-week-field="mode"><option value="ride" ${day.rest ? '' : 'selected'}>Workout</option><option value="rest" ${day.rest ? 'selected' : ''}>Rest day</option></select></div>${day.rest ? `<p class="helper">Recovery is part of the plan. Change to Workout if needed.</p>` : `<details><summary>${safe(day.headline || 'Edit workout')} · Preview and edit</summary><div class="week-day-details"><p class="helper">${safe(day.why_line || 'Review the purpose and blocks before publishing.')}</p><div class="form-group"><label for="week-headline-${day.day_of_week}">Workout title</label><input id="week-headline-${day.day_of_week}" data-week-field="headline" maxlength="60" value="${safe(day.headline)}"></div><div class="form-group"><label for="week-description-${day.day_of_week}">Athlete instructions</label><textarea id="week-description-${day.day_of_week}" data-week-field="description" rows="3">${safe(day.description)}</textarea></div><div class="form-group"><label for="week-why-${day.day_of_week}">Why this session</label><textarea id="week-why-${day.day_of_week}" data-week-field="why_line" rows="2">${safe(day.why_line)}</textarea></div><div class="block-list">${weekBlocksMarkup(day)}</div><button type="button" class="secondary small-button" data-week-add="${day.day_of_week}">Add block</button><div class="week-day-ai"><label for="week-ai-${day.day_of_week}">Ask AI to change ${label}</label><textarea id="week-ai-${day.day_of_week}" data-week-ai-prompt rows="2" placeholder="Make this a Z2 ride with short sprints"></textarea><button type="button" class="secondary" data-week-ai="${day.day_of_week}">Draft a change</button><p class="helper">Your draft stays private until you review and publish the week.</p></div></div></details>`}<div class="week-day-transfer"><label for="week-move-to-${day.day_of_week}">Move to day</label><select id="week-move-to-${day.day_of_week}" data-week-target><option value="">Choose</option>${movable.map((d) => `<option value="${d.day_of_week}">${DAYS[d.day_of_week]}</option>`).join('')}</select><button type="button" class="quiet" data-week-swap="${day.day_of_week}">Move</button></div></article>`;
+  return `<article class="week-edit-day" data-week-day="${day.day_of_week}" draggable="true"><div class="week-edit-heading"><strong>${label}</strong><span>${safe(minutesLabel(weekMinutes(day)))}</span></div>${day.rest ? '' : zones}<div class="week-day-choice"><label for="week-mode-${day.day_of_week}">Plan for ${label}</label><select id="week-mode-${day.day_of_week}" data-week-field="mode"><option value="ride" ${day.rest ? '' : 'selected'}>Workout</option><option value="rest" ${day.rest ? 'selected' : ''}>Rest day</option></select></div>${day.rest ? `<p class="helper">Recovery is part of the plan. Change to Workout if needed.</p>` : `<details><summary>${safe(day.headline || 'Edit workout')} · Preview and edit</summary><div class="week-day-details"><p class="helper">${safe(day.why_line || 'Review the purpose and blocks before publishing.')}</p><div class="form-group"><label for="week-headline-${day.day_of_week}">Workout title</label><input id="week-headline-${day.day_of_week}" data-week-field="headline" maxlength="60" value="${safe(day.headline)}"></div><div class="form-group"><label for="week-description-${day.day_of_week}">Athlete instructions</label><textarea id="week-description-${day.day_of_week}" data-week-field="description" rows="3">${safe(day.description)}</textarea></div><div class="form-group"><label for="week-why-${day.day_of_week}">Why this session</label><textarea id="week-why-${day.day_of_week}" data-week-field="why_line" rows="2">${safe(day.why_line)}</textarea></div><div class="block-list">${weekBlocksMarkup(day)}</div><button type="button" class="secondary small-button" data-week-add="${day.day_of_week}">Add block</button><div class="week-day-ai"><label for="week-ai-${day.day_of_week}">Ask AI to change ${label}</label><textarea id="week-ai-${day.day_of_week}" data-week-ai-prompt rows="2" placeholder="Make this a Z2 ride with short sprints"></textarea><button type="button" class="secondary" data-week-ai="${day.day_of_week}">Draft a change</button><p class="helper">Your draft stays private until you review and publish the week.</p></div></div></details>`}<div class="week-day-transfer"><label for="week-move-to-${day.day_of_week}">Move to day</label><select id="week-move-to-${day.day_of_week}" data-week-target><option value="">Choose</option>${movable.map((d) => `<option value="${d.day_of_week}">${DAYS[d.day_of_week]}</option>`).join('')}</select><button type="button" class="quiet" data-week-swap="${day.day_of_week}">Move</button></div></article>`;
 }
 function weekOverviewMarkup(selected, storedPlan) {
   const workouts = (state.athlete?.workouts || []).filter((w) => w.plan_id === storedPlan?.id);
@@ -994,7 +948,7 @@ function renderWeekEditor() {
     : block?.loading_week ? `Loading week ${block.block_week_number || ''}${block.next_week_recovery ? ' · recovery planned next week' : ''}.` : '';
   const content = d ? `<div class="callout"><strong>Training load draft</strong><p>${safe(d.summary || 'A balanced starting point for coach review.')}</p><small>${safe(blockText)} Recent cycling average: ${safe(trainingMinutesLabel(d.evidence.recent_average_min))} per week · Evidence-guided draft ceiling: ${safe(trainingMinutesLabel(d.evidence.draft_ceiling_min ?? d.evidence.baseline_cap_min))} · Single-session limit: ${safe(trainingMinutesLabel(d.evidence.session_cap_min))}. ${d.notes_considered ? `${d.notes_considered} athlete note${d.notes_considered === 1 ? '' : 's'} considered.` : 'No athlete notes yet.'}${d.evidence.sessions < 2 ? ' Recent riding is limited, so review the starting load closely.' : ''}</small></div><div class="week-edit-list">${d.days.map(weekDayMarkup).join('')}</div><div class="week-review"><div><span>Projected training, including recorded rides</span><strong id="week-total"></strong></div><p>AI prepared the draft. You decide whether to publish it; recorded and fixed days stay in place.</p><div id="week-load-warning" class="callout warning" hidden><label class="acknowledge"><input id="week-acknowledge" type="checkbox"> I reviewed the added load above recent training.</label></div><p id="week-error" class="form-error" role="alert"></p><button type="button" class="primary" data-publish-week>Publish reviewed week</button><div class="week-review-actions"><button type="button" class="quiet" data-generate-week>Refresh week</button>${hasStoredDays ? '<button type="button" class="danger" data-reset-week>Delete week</button>' : ''}</div></div>` : weekOverviewMarkup(selected, storedPlan);
 
-  openEditor('week', 'WEEK BUILDER', 'Plan the week', `<div class="planning-workspace"><aside class="planning-brief"><p class="eyebrow">COACH DIRECTION</p><h3>What are we working toward?</h3><p>Set the focus, then shape each day around the athlete.</p>${selector}${hourRange}${focus}<p id="week-status" class="status" role="status"></p></aside><div class="planning-canvas">${content}</div></div>`);
+  openEditor('week', 'WEEK BUILDER', 'Build the full week', `<p>Build the training week from the available evidence and coach direction, then review every day.</p>${selector}${hourRange}${focus}<p id="week-status" class="status" role="status"></p>${content}`);
   if (d) updateWeekTotal();
 }
 function openWeek(weekStart = currentWeek()) { state.weekDraft = null; state.weekSelection = weekStart; state.editorDirty = false; renderWeekEditor(); }
@@ -1260,7 +1214,7 @@ for (const [id, provider] of [['google-sign-in', 'google']]) {
 }
 $('#sign-out').addEventListener('click', async () => {
   try { await authRequest('logout', { method: 'POST', headers: { Authorization: 'Bearer ' + await token() } }); } catch { /* Clear the local session even if the server is unavailable. */ }
-  clearSession(); state.athleteRequest++; state.roster = []; rosterInsights.clear(); insightQueue.length = 0; state.athlete = null; state.athleteId = null; resetAnalysis(); closeDrawer(true); $('#athlete-pane').innerHTML = ''; $('#drawer-body').innerHTML = ''; showAuth(''); history.replaceState(null,'','#team');
+  clearSession(); state.athleteRequest++; state.roster = []; state.athlete = null; state.athleteId = null; resetAnalysis(); closeDrawer(true); $('#athlete-pane').innerHTML = ''; $('#drawer-body').innerHTML = ''; showAuth(''); history.replaceState(null,'','#team');
 });
 $('#retry-workspace').addEventListener('click', resumeWorkspace);
 $('#show-attention').addEventListener('click', showAttention);
@@ -1270,20 +1224,27 @@ $('.workspace-nav').addEventListener('click', (event) => {
   closeDrawer(true);
 }, true);
 $('#show-athletes').addEventListener('click', () => showAthletes());
+function closeMobileNavigation(restoreFocus = false) {
+  const wasOpen = $('.topbar').classList.contains('mobile-nav-open');
+  $('.topbar').classList.remove('mobile-nav-open');
+  $('#mobile-nav-toggle').setAttribute('aria-expanded','false');
+  if (wasOpen && restoreFocus) $('#mobile-nav-toggle').focus();
+}
+$('#mobile-nav-toggle').addEventListener('click', () => {
+  const open = $('.topbar').classList.toggle('mobile-nav-open');
+  $('#mobile-nav-toggle').setAttribute('aria-expanded',String(open));
+});
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeMobileNavigation(true); });
+document.addEventListener('click', (event) => { if (!event.target.closest('.topbar')) closeMobileNavigation(); });
+$('.skip-link').addEventListener('click', (event) => {
+  event.preventDefault();
+  const target = !$('#auth-page').hidden ? $('#auth-title') : !$('#drawer').hidden ? $('#drawer-title') : $('#workspace').classList.contains('mobile-detail-open') ? $('.athlete-identity h2') : $('#workspace-title');
+  target.setAttribute('tabindex','-1'); target.focus();
+});
 $('#collapse-nav').addEventListener('click', () => saveCoachPrefs({ compactNav: !readCoachPrefs().compactNav }));
 $('#setting-compact-nav').addEventListener('change', (event) => saveCoachPrefs({ compactNav: event.target.checked }));
 $('#setting-chart-points').addEventListener('change', (event) => saveCoachPrefs({ chartPoints: event.target.checked }));
 $('#show-settings').addEventListener('click', showSettings);
-$('#roster-sort').addEventListener('change', () => { state.rosterPage=0; renderRoster(); });
-$('.header-account').append($('.head-actions'), $('#account-menu'));
-$('.sidebar-note').remove();
-$('.studio-bar').before(document.createComment('Coach Studio toolbar'));
-$('.studio-bar').hidden = true;
-for (const button of document.querySelectorAll('.workspace-nav-item')) button.title = button.querySelector('span')?.textContent || 'Navigate';
-$('#account-settings').addEventListener('click', () => { $('#account-menu').open = false; $('#show-settings').click(); });
-$('#account-connections').addEventListener('click', () => { $('#account-menu').open = false; $('#show-devices').click(); });
-document.addEventListener('click', (event) => { for (const menu of document.querySelectorAll('.account-menu[open],.new-menu[open],.chart-customizer[open]')) if (!menu.contains(event.target)) menu.open = false; });
-document.addEventListener('keydown', (event) => { if (event.key !== 'Escape') return; for (const menu of document.querySelectorAll('.account-menu[open],.new-menu[open],.chart-customizer[open]')) { menu.open = false; menu.querySelector('summary').focus(); } });
 $('#settings-view').addEventListener('click', (event) => { const section = event.target.closest('[data-settings-section]'); if (section) document.getElementById(section.dataset.settingsSection)?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' }); });
 $('#settings-sign-out').addEventListener('click', () => $('#sign-out').click());
 $('#dashboard-all-athletes').addEventListener('click', () => showAthletes());
@@ -1303,8 +1264,8 @@ $('#toggle-athletes').addEventListener('click', () => {
   $('#toggle-athletes').setAttribute('aria-label', node.hidden ? 'Show athlete list' : 'Hide athlete list');
 });
 $('#toggle-tools').addEventListener('click', () => { if (readCoachPrefs().compactNav) saveCoachPrefs({ compactNav: false }); const node = $('#nav-tools-list'); node.hidden = !node.hidden; $('#toggle-tools').setAttribute('aria-expanded', String(!node.hidden)); });
-$('#nav-athlete-list').addEventListener('click', async (event) => { $('#nav-athlete-list').hidden=true; $('#toggle-athletes').setAttribute('aria-expanded','false'); const button = event.target.closest('[data-nav-athlete]'); if (!button) return; showAthletes(false, false); await selectAthlete(button.dataset.navAthlete, { openDetail: true, pushRoute: true }); $('#athlete-pane').focus(); });
-$('#nav-tools-list').addEventListener('click', async (event) => { $('#nav-tools-list').hidden=true; $('#toggle-tools').setAttribute('aria-expanded','false');
+$('#nav-athlete-list').addEventListener('click', async (event) => { const button = event.target.closest('[data-nav-athlete]'); if (!button) return; showAthletes(false, false); await selectAthlete(button.dataset.navAthlete, { openDetail: true, pushRoute: true }); $('#athlete-pane').focus(); });
+$('#nav-tools-list').addEventListener('click', async (event) => {
   const button = event.target.closest('[data-nav-tool]'); if (!button) return;
   const id = state.athleteId && state.roster.some((p) => p.id === state.athleteId) ? state.athleteId : state.roster[0]?.id;
   if (!id) { showAthletes(); $('#roster-query').focus(); return; }
@@ -1365,7 +1326,7 @@ $('#remove-garmin-dialog').addEventListener('close', async () => {
   try { await wearables('remove'); await showDevices(); setStatus('Garmin connection and imported data removed.'); $('#show-devices').focus(); }
   catch (error) { setStatus(error.message, true); trigger?.focus(); }
 });
-$('#refresh-attention').addEventListener('click', () => { for (const [id, value] of rosterInsights) if (!value.loading) rosterInsights.delete(id); showAttention(); });
+$('#refresh-attention').addEventListener('click', showAttention);
 $('#open-next-attention').addEventListener('click', async () => {
   const next = state.attention?.items.find((item) => !item.reviewed_at);
   if (!next) return;
@@ -1441,7 +1402,7 @@ $('#attention-list').addEventListener('click', async (event) => {
     scrollTo(0, 0);
   }
 });
-addEventListener('storage', (event) => { if (event.key === SESSION_KEY && !event.newValue && !$('#workspace').hidden) { state.roster = []; rosterInsights.clear(); insightQueue.length = 0; state.athlete = null; state.athleteId = null; showAuth('Signed out in another tab.'); } });
+addEventListener('storage', (event) => { if (event.key === SESSION_KEY && !event.newValue && !$('#workspace').hidden) { state.roster = []; state.athlete = null; state.athleteId = null; showAuth('Signed out in another tab.'); } });
 $('#roster-query').addEventListener('input', () => { state.rosterPage = 0; renderRoster(); });
 $('#roster-sport').addEventListener('change', () => { state.rosterPage = 0; renderRoster(); });
 $('.roster-pagination').addEventListener('click', (event) => { const page = event.target.closest('[data-roster-page]'); if (!page) return; state.rosterPage += Number(page.dataset.rosterPage); renderRoster(); $('#roster-list').querySelector('[data-athlete]')?.focus(); });
@@ -1721,18 +1682,3 @@ $('#drawer-body').addEventListener('click', (event) => { const mode = event.targ
 
 document.addEventListener('change',(event)=>{ if(event.target.matches('[data-block-field]')) paintBuilderTimeline(); });
 document.addEventListener('input',(event)=>{ if(event.target.matches('[data-block-field="duration_min"]')) paintBuilderTimeline(); });
-
-// Navigation popovers dismiss consistently with the account menu.
-document.addEventListener('click', (event) => {
-  for (const [panel,trigger] of [['nav-tools-list','toggle-tools'],['nav-athlete-list','toggle-athletes']]) {
-    if (!document.getElementById(panel).contains(event.target) && !document.getElementById(trigger).contains(event.target)) {
-      document.getElementById(panel).hidden=true; document.getElementById(trigger).setAttribute('aria-expanded','false');
-    }
-  }
-});
-document.addEventListener('keydown', (event) => {
-  if(event.key !== 'Escape') return;
-  for (const [panel,trigger] of [['nav-tools-list','toggle-tools'],['nav-athlete-list','toggle-athletes']]) {
-    if(!document.getElementById(panel).hidden) { document.getElementById(panel).hidden=true; document.getElementById(trigger).setAttribute('aria-expanded','false'); document.getElementById(trigger).focus(); }
-  }
-});

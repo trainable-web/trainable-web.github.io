@@ -1,0 +1,19 @@
+InstrumentSans-Regular
+Copyright 2022 The Instrument Sans Project Authors (https://github.com/Instrument/instrument-sans)
+This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://scripts.sil.org/OFL
+https://scripts.sil.org/OFL
+
+InstrumentSans-Bold
+Copyright 2022 The Instrument Sans Project Authors (https://github.com/Instrument/instrument-sans)
+This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: https://scripts.sil.org/OFL
+https://scripts.sil.org/OFL
+
+IBMPlexMono-Regular
+Copyright 2017 IBM Corp. All rights reserved.
+This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL
+http://scripts.sil.org/OFL
+
+IBMPlexMono-Bold
+Copyright 2017 IBM Corp. All rights reserved.
+This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL
+http://scripts.sil.org/OFL
