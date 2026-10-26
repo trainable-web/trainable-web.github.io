@@ -1,6 +1,7 @@
 /* Analytics / Reporting: independent, reusable chart instances on a saved workspace. */
 const CHART_BOARD_CATALOG = [
   { type: 'power', title: 'Power-duration curve', group: 'Performance', description: 'Measured best efforts across the period, with the exact source ride and interval.', size: 2 },
+  { type: 'recordedPowerProfile', title: 'Power profile comparison', group: 'Performance', description: 'Compare recorded bests across two periods, with exact source efforts and recording opportunities.', size: 2 },
   { type: 'recordedEfforts', title: 'Recorded effort progression', group: 'Performance', description: 'Daily best measured efforts, with exact source windows and records within the selected period.', size: 1 },
   { type: 'periodDistribution', title: 'Period power distribution', group: 'Training', description: 'How recorded time and mechanical work are distributed across power outputs.', size: 1 },
   { type: 'intensity', title: 'Training intensity', group: 'Training', description: 'Time and work in dated FTP reference bands, for the period or by week.', size: 1 },
@@ -36,7 +37,8 @@ function chartBoardPreferences() {
   const result = (Array.isArray(saved) ? saved : defaults).filter(item => item && CHART_BOARD_CATALOG.some(chart => chart.type === item.type)).map(item => {
     const id = typeof item.id === 'string' && /^cb-[a-zA-Z0-9-]{1,80}$/.test(item.id) && !seen.has(item.id) ? item.id : chartBoardId();
     seen.add(id);
-    return { id, type: item.type, size: item.size === 2 ? 2 : 1, duration: CHART_EXPLORER_DURATIONS.some(([seconds]) => seconds === item.duration) ? item.duration : 300, activityId: typeof item.activityId === 'string' ? item.activityId.slice(0, 200) : '', metric: ['ctl', 'atl', 'tsb'].includes(item.metric) ? item.metric : 'all', basis: item.basis === 'work' ? 'work' : 'time', grouping: item.grouping === 'weekly' ? 'weekly' : 'period' };
+    const durations = [...new Set((Array.isArray(item.profileDurations) ? item.profileDurations : []).filter(value => POWER_PROFILE_DURATIONS.includes(value)))].sort((a, b) => a - b);
+    return { id, type: item.type, size: item.size === 2 ? 2 : 1, duration: CHART_EXPLORER_DURATIONS.some(([seconds]) => seconds === item.duration) ? item.duration : 300, activityId: typeof item.activityId === 'string' ? item.activityId.slice(0, 200) : '', metric: ['ctl', 'atl', 'tsb'].includes(item.metric) ? item.metric : 'all', basis: item.basis === 'work' ? 'work' : 'time', grouping: item.grouping === 'weekly' ? 'weekly' : 'period', comparisonMode: ['year', 'custom'].includes(item.comparisonMode) ? item.comparisonMode : 'previous', referenceFrom: typeof item.referenceFrom === 'string' ? item.referenceFrom.slice(0, 10) : '', referenceTo: typeof item.referenceTo === 'string' ? item.referenceTo.slice(0, 10) : '', profileDurations: durations.length ? durations : [...POWER_PROFILE_DEFAULTS] };
   });
   chartBoardSession = result;
   return result;
@@ -62,6 +64,34 @@ function chartBoardReadout(value, unit, label, note = '') {
 }
 function chartBoardSourceWindow(point) {
   return `<button type="button" class="record-link" data-board-window="${safe(point.activity_id || '')}" data-window-from="${Number(point.from_s)}" data-window-to="${Number(point.to_s)}" data-window-watts="${Number(point.average_w)}">${safe(elapsedLabel(point.from_s))}–${safe(elapsedLabel(point.to_s))} ↗</button>`;
+}
+function chartBoardProfileLabel(seconds) { return seconds < 60 ? `${seconds} s` : seconds < 3600 ? `${seconds / 60} min` : `${seconds / 3600} h`; }
+function chartBoardProfileStatus(snapshot) {
+  return snapshot.status === 'loading' ? `${snapshot.phase || 'Preparing comparison'}${snapshot.total ? `: ${snapshot.processed} of ${snapshot.total} rides checked.` : '…'}` : snapshot.status === 'ready' ? 'Comparison ready. Recorded bests are shown below.' : '';
+}
+function chartBoardPowerProfile(item) {
+  const snapshot = powerProfileSnapshot(item), evidence = snapshot.status === 'ready' ? snapshot.evidence : null;
+  let reference;
+  try { reference = powerProfileReferenceRange(item); } catch { reference = null; }
+  const dateRange = range => range ? `${range.from} – ${range.to}` : 'Choose valid reference dates';
+  const controls = `<div class="cb-profile-controls"><label>Compare against<select data-profile-mode="${item.id}"><option value="previous" ${item.comparisonMode === 'previous' ? 'selected' : ''}>Previous equal period</option><option value="year" ${item.comparisonMode === 'year' ? 'selected' : ''}>Same dates last year</option><option value="custom" ${item.comparisonMode === 'custom' ? 'selected' : ''}>Custom dates</option></select></label>${item.comparisonMode === 'custom' ? `<label>Reference start<input type="date" data-profile-from="${item.id}" value="${safe(item.referenceFrom)}" aria-describedby="${item.id}-profile-error"></label><label>Reference end<input type="date" data-profile-to="${item.id}" value="${safe(item.referenceTo)}" aria-describedby="${item.id}-profile-error"></label>` : ''}<details class="cb-profile-duration-picker"><summary>Durations (${item.profileDurations.length})</summary><fieldset><legend>Recorded effort durations</legend>${POWER_PROFILE_DURATIONS.map(seconds => `<label><input type="checkbox" data-profile-duration="${item.id}" value="${seconds}" ${item.profileDurations.includes(seconds) ? 'checked' : ''}>${chartBoardProfileLabel(seconds)}</label>`).join('')}</fieldset></details></div><p id="${item.id}-profile-error" class="form-error" role="alert" hidden></p><div class="cb-profile-periods"><p><strong><i class="cb-profile-key cb-profile-current" aria-hidden="true"></i>Selected period</strong><span>${safe(dateRange(analysis.range))}</span></p><p><strong><i class="cb-profile-key cb-profile-reference" aria-hidden="true"></i>Reference period</strong><span>${safe(dateRange(reference))}</span></p></div><p class="cb-profile-live" data-profile-live="${item.id}" role="status" aria-live="polite">${safe(chartBoardProfileStatus(snapshot))}</p>`;
+  const action = snapshot.status === 'loading' ? `<button type="button" class="secondary" data-profile-cancel="${item.id}">Stop comparison</button>` : `<button type="button" class="${evidence ? 'secondary' : 'primary'}" data-profile-calculate="${item.id}">${snapshot.status === 'error' ? 'Retry comparison' : evidence ? 'Recalculate comparison' : 'Calculate comparison'}</button>`;
+  let output = action, rows = [], notes = ['Select a reference period, then calculate the observed best efforts from recorded cycling power.'];
+  if (snapshot.status === 'error') output = `<p class="form-error" role="alert">${safe(snapshot.error)}</p>${action}`;
+  else if (snapshot.status === 'loading') output = `<p class="cb-caption">Both periods must finish before a comparison is shown.</p>${action}`;
+  else if (!evidence) output = `<p class="cb-caption">Compare measured bests from both periods. Every result keeps its source ride and exact time window.</p>${action}`;
+  else {
+    const visible = evidence.rows.filter(row => item.profileDurations.includes(row.duration_s));
+    const max = Math.max(1, ...visible.flatMap(row => [row.current?.average_w || 0, row.reference?.average_w || 0]));
+    const delta = row => row.change_w === null ? '—' : `${row.change_w > 0 ? '+' : ''}${numberLabel(row.change_w, ' W', 1)}`;
+    const bars = visible.map(row => `<div class="cb-profile-row"><strong>${chartBoardProfileLabel(row.duration_s)}</strong><div class="cb-profile-pair">${['current', 'reference'].map(key => { const point = row[key]; return `<div aria-label="${key === 'current' ? 'Selected' : 'Reference'} period: ${point ? numberLabel(point.average_w, ' watts', 1) : 'no recorded effort'}"><span class="cb-profile-track"><i class="cb-profile-${key}" style="width:${point ? point.average_w / max * 100 : 0}%"></i></span><span>${point ? numberLabel(point.average_w, ' W', 1) : '—'}</span></div>`; }).join('')}</div><div class="cb-profile-change"><strong>${delta(row)}</strong><span>${row.change_pct === null ? row.change_pct_unavailable_reason === 'zero_reference' ? '% unavailable' : 'Not paired' : `${row.change_pct > 0 ? '+' : ''}${numberLabel(row.change_pct, '%', 1)}`}</span></div></div>`).join('');
+    const coverage = ['current', 'reference'].map(key => { const c = evidence.periods[key].coverage; return `<span><strong>${key === 'current' ? 'Selected' : 'Reference'}:</strong> ${numberLabel(c.effort_activities)} of ${numberLabel(c.expected_activities)} eligible rides have recorded efforts${c.coverage_limited ? ' · Incomplete coverage' : ''}.</span>`; }).join('');
+    const warnings = evidence.warnings.filter(warning => warning.code !== 'missing_durations' || visible.some(row => row.status !== 'paired')).filter(warning => warning.code !== 'unequal_opportunities' || visible.some(row => row.unequal_opportunities));
+    output = `<div class="cb-profile-plot"><div class="cb-profile-columns"><span>Duration</span><span>Recorded best power</span><span>Change</span></div>${bars}</div><p class="cb-caption">Bar lengths share one watt scale. Change is selected minus reference. Missing efforts are —.</p><p class="cb-profile-coverage">${coverage}</p>${warnings.length ? `<details class="cb-profile-context"><summary>Comparison context (${warnings.length})</summary><ul>${warnings.map(warning => `<li>${safe(warning.message.replace('The current period', 'The selected period'))}</li>`).join('')}</ul></details>` : ''}<p class="cb-caption">Different riding or testing opportunities can change recorded bests. This does not measure a change in physiological capacity.</p>${action}`;
+    rows = visible.flatMap(row => ['current', 'reference'].map(key => { const point = row[key], opportunities = row[`${key}_opportunities`]; return [chartBoardProfileLabel(row.duration_s), key === 'current' ? 'Selected' : 'Reference', point ? numberLabel(point.average_w, ' W', 1) : '—', point ? chartBoardSource(point) : 'No eligible effort', point ? chartBoardSourceWindow(point) : '—', numberLabel(opportunities.eligible_activities), numberLabel(opportunities.eligible_days), numberLabel(opportunities.candidate_windows), point ? `${numberLabel(point.age_days_at_comparison_end)} days` : '—']; }));
+    notes = [...warnings.map(warning => warning.message.replace('The current period', 'The selected period')), ...evidence.caveats];
+  }
+  return { html: controls + `<div class="cb-profile-output">${output}</div>`, output, headers: ['Duration', 'Period', 'Recorded best', 'Source ride', 'Exact source window', 'Eligible rides', 'Eligible days', 'Candidate windows', 'Age at comparison end'], rows, notes };
 }
 const CHART_BOARD_PERIOD_TYPES = ['power', 'recordedEfforts', 'periodDistribution', 'intensity'];
 function chartBoardPeriodState(titleText, description) {
@@ -227,12 +257,29 @@ function chartBoardResult(item) {
   if (!analysis.trends) return { html: chartBoardNotice('Loading the selected period…', 'Each chart will appear as its source data arrives.'), loading: true };
   if (analysis.trends.error) return { html: chartBoardNotice('Could not load this period', analysis.trends.error, '<button type="button" class="secondary" data-analysis-retry="charts">Try again</button>') };
   if (CHART_BOARD_CATALOG.find(chart => chart.type === item.type)?.ride) return chartBoardRide(item);
-  const render = { power: chartBoardPower, recordedEfforts: chartBoardRecordedEfforts, periodDistribution: chartBoardPeriodDistribution, intensity: chartBoardIntensity, savedPower: chartBoardSavedPower, load: chartBoardLoad, ramp: chartBoardRamp, efforts: chartBoardEfforts, volume: chartBoardVolume, comparison: chartBoardComparison, sleep: chartBoardSleep }[item.type];
+  const render = { power: chartBoardPower, recordedPowerProfile: chartBoardPowerProfile, recordedEfforts: chartBoardRecordedEfforts, periodDistribution: chartBoardPeriodDistribution, intensity: chartBoardIntensity, savedPower: chartBoardSavedPower, load: chartBoardLoad, ramp: chartBoardRamp, efforts: chartBoardEfforts, volume: chartBoardVolume, comparison: chartBoardComparison, sleep: chartBoardSleep }[item.type];
   return render ? render(item) : { html: '' };
 }
 function chartBoardBody(item) {
   const result = chartBoardResult(item), expanded = chartBoardExpanded === item.id;
-  return `<div class="cb-chart-content" ${result.loading ? 'aria-busy="true"' : ''}>${result.html}</div>${expanded ? `<section class="cb-source-data"><div class="cb-source-heading"><div><h4>Source data</h4><p>Missing values appear as — · Dates in UTC</p></div><button type="button" class="secondary" data-board-export="${item.id}">Export data (CSV)</button></div>${tableMarkup(result.headers || ['Availability'], result.rows || [], 'No source rows are available for this chart.')}${result.extra || ''}<div class="cb-method"><h4>How to read this chart</h4><ul>${(result.notes || ['Open the source activity to inspect the recorded measurements.']).map(note => `<li>${safe(note)}</li>`).join('')}</ul></div></section>` : ''}`;
+  return `<div class="cb-chart-content" ${result.loading ? 'aria-busy="true"' : ''}>${result.html}</div>${expanded ? `<section class="cb-source-data">${chartBoardSourceMarkup(item, result)}</section>` : ''}`;
+}
+function chartBoardSourceMarkup(item, result) {
+  return `<div class="cb-source-heading"><div><h4>Source data</h4><p>Missing values appear as — · Dates in UTC</p></div><button type="button" class="secondary" data-board-export="${item.id}">Export data (CSV)</button></div>${tableMarkup(result.headers || ['Availability'], result.rows || [], 'No source rows are available for this chart.')}${result.extra || ''}<div class="cb-method"><h4>How to read this chart</h4><ul>${(result.notes || ['Open the source activity to inspect the recorded measurements.']).map(note => `<li>${safe(note)}</li>`).join('')}</ul></div>`;
+}
+// deno-lint-ignore no-unused-vars
+function chartBoardRefreshProfile() {
+  if (analysis.tab !== 'charts' || !document.querySelector('.chart-board')) return;
+  const active = document.activeElement, focusCard = active?.closest('[data-board-card]')?.dataset.boardCard;
+  const restoreAction = active?.matches('[data-profile-calculate],[data-profile-cancel]');
+  for (const item of chartBoardPreferences().filter(card => card.type === 'recordedPowerProfile')) {
+    const body = document.querySelector(`[data-board-card="${item.id}"] .cb-card-body`), output = body?.querySelector('.cb-profile-output');
+    if (!output) continue;
+    const result = chartBoardPowerProfile(item); output.innerHTML = result.output;
+    const status = body.querySelector('[data-profile-live]'); if (status) status.textContent = chartBoardProfileStatus(powerProfileSnapshot(item));
+    const source = body.querySelector('.cb-source-data'); if (source) source.innerHTML = chartBoardSourceMarkup(item, result);
+  }
+  if (restoreAction) document.querySelector(`[data-board-card="${focusCard}"] [data-profile-cancel], [data-board-card="${focusCard}"] [data-profile-calculate]`)?.focus({ preventScroll: true });
 }
 // Period calculations update their own cards without disturbing other charts or controls.
 // deno-lint-ignore no-unused-vars
@@ -256,7 +303,14 @@ function chartBoardRefreshPower() {
 function chartBoardExportEvidence(item) {
   const evidence = chartExplorerEvidence(), detail = chartBoardDetail(item)?.detail, activity = chartBoardActivity(item), t = analysis.trends || {};
   let headers = [], rows = [];
-  if (item.type === 'power') {
+  if (item.type === 'recordedPowerProfile') {
+    const snapshot = powerProfileSnapshot(item), profile = snapshot.status === 'ready' ? snapshot.evidence : null;
+    headers = ['duration_s', 'period', 'period_from_utc', 'period_to_utc', 'average_w', 'activity_id', 'activity_name', 'activity_start_utc', 'source_from_s', 'source_to_s_exclusive', 'source_candidate_count', 'quality', 'flags', 'age_days_at_period_end', 'age_days_at_comparison_end', 'eligible_activities', 'eligible_days', 'candidate_windows', 'change_w', 'change_pct', 'change_pct_unavailable_reason', 'pair_status', 'expected_activities', 'received_activities', 'effort_activities', 'unavailable_effort_activities', 'coverage_limited', 'overlap_days', 'unequal_period_lengths', 'unequal_opportunities', 'algorithm_version', 'comparison_version'];
+    if (profile) rows = profile.rows.filter(row => item.profileDurations.includes(row.duration_s)).flatMap(row => ['current', 'reference'].map(key => {
+      const point = row[key], period = profile.periods[key], opportunities = row[`${key}_opportunities`], coverage = period.coverage;
+      return [row.duration_s, key === 'current' ? 'selected' : 'reference', period.range.from, period.range.to, point?.average_w, point?.activity_id, point?.activity_name, point?.start_date, point?.from_s, point?.to_s, point?.candidate_count, point?.quality, point?.flags?.join('; '), point?.age_days_at_range_end, point?.age_days_at_comparison_end, opportunities.eligible_activities, opportunities.eligible_days, opportunities.candidate_windows, row.change_w, row.change_pct, row.change_pct_unavailable_reason, row.status, coverage.expected_activities, coverage.received_activities, coverage.effort_activities, coverage.unavailable_effort_activities, coverage.coverage_limited, profile.overlap?.days || 0, profile.unequal_period_lengths, row.unequal_opportunities, point?.algorithm_version, profile.version];
+    }));
+  } else if (item.type === 'power') {
     const snapshot = typeof periodPowerSnapshot === 'function' ? periodPowerSnapshot() : {};
     headers = ['duration_s', 'average_w', 'activity_id', 'activity_name', 'source_from_s', 'source_to_s_exclusive', 'candidate_count', 'algorithm_version', 'processed_activities', 'unavailable_activities', 'coverage_limited'];
     if (snapshot.status === 'ready') rows = (snapshot.points || []).map(point => [point.duration_s, point.average_w, point.activity_id, point.activity_name, point.from_s, point.to_s, point.candidate_count, point.algorithm_version, snapshot.processed, snapshot.unavailable_activities, snapshot.evidence?.efforts?.coverage_limited ?? snapshot.coverage_limited]);
@@ -336,6 +390,7 @@ function paintChartBoard() {
   if (chartBoardActiveAthlete !== state.athleteId) { chartBoardActiveAthlete = state.athleteId; chartBoardExpanded = null; chartBoardUndo = null; }
   if (chartBoardActiveScope !== chartBoardScope()) { chartBoardActiveScope = chartBoardScope(); chartBoardDetails.clear(); }
   const items = chartBoardPreferences();
+  invalidatePowerProfile();
   if (!items.some(item => item.id === chartBoardExpanded)) chartBoardExpanded = null;
   const catalogOpen = container.querySelector('.cb-catalog')?.open || false;
   const search = container.querySelector('[data-board-search]')?.value || '';
@@ -415,6 +470,54 @@ function chartBoardMove(id, direction) {
   chartBoardSave(items); paintChartBoard(); chartBoardFocus(id); chartBoardAnnounce(`Chart moved to position ${next + 1} of ${items.length}.`);
 }
 document.addEventListener('input', event => { if (event.target.matches('[data-board-search]')) chartBoardFilterCatalog(event.target.value); });
+function chartBoardProfileError(id, message) {
+  const error = document.getElementById(`${id}-profile-error`);
+  if (error) { error.textContent = message || ''; error.hidden = !message; }
+  document.querySelectorAll(`[data-profile-from="${id}"],[data-profile-to="${id}"]`).forEach(input => { if (message) input.setAttribute('aria-invalid', 'true'); else input.removeAttribute('aria-invalid'); });
+}
+document.addEventListener('focusin', event => {
+  const id = event.target.dataset.profileFrom || event.target.dataset.profileTo;
+  if (id) chartBoardProfileError(id, '');
+});
+document.addEventListener('input', event => {
+  const id = event.target.dataset.profileFrom || event.target.dataset.profileTo;
+  if (id) chartBoardProfileError(id, '');
+});
+document.addEventListener('focusout', event => {
+  const id = event.target.dataset.profileFrom || event.target.dataset.profileTo;
+  if (!id) return;
+  const item = chartBoardPreferences().find(card => card.id === id);
+  if (item) chartBoardProfileError(id, powerProfileSnapshot(item).validation || '');
+});
+document.addEventListener('change', event => {
+  const target = event.target.closest('[data-profile-mode],[data-profile-from],[data-profile-to],[data-profile-duration]');
+  if (!target) return;
+  const attribute = ['data-profile-mode', 'data-profile-from', 'data-profile-to', 'data-profile-duration'].find(name => target.hasAttribute(name)), id = target.getAttribute(attribute);
+  const items = chartBoardPreferences(), item = items.find(card => card.id === id); if (!item) return;
+  if (attribute === 'data-profile-mode') {
+    if (target.value === 'custom' && (!item.referenceFrom || !item.referenceTo)) { const previous = powerProfileReferenceRange({ comparisonMode: 'previous' }); item.referenceFrom = previous.from; item.referenceTo = previous.to; }
+    item.comparisonMode = target.value;
+  } else if (attribute === 'data-profile-from') item.referenceFrom = target.value;
+  else if (attribute === 'data-profile-to') item.referenceTo = target.value;
+  else {
+    const seconds = Number(target.value);
+    if (!target.checked && item.profileDurations.length === 1) { target.checked = true; chartBoardAnnounce('Keep at least one duration selected.'); return; }
+    item.profileDurations = target.checked ? [...item.profileDurations, seconds].sort((a, b) => a - b) : item.profileDurations.filter(value => value !== seconds);
+  }
+  const value = target.value;
+  chartBoardSave(items); paintChartBoard();
+  const next = document.querySelector(`[${attribute}="${id}"]${attribute === 'data-profile-duration' ? `[value="${value}"]` : ''}`);
+  if (attribute === 'data-profile-duration') next?.closest('details')?.setAttribute('open', '');
+  next?.focus({ preventScroll: true });
+});
+document.addEventListener('click', event => {
+  const control = event.target.closest('[data-profile-calculate],[data-profile-cancel]'); if (!control) return;
+  const id = control.dataset.profileCalculate || control.dataset.profileCancel, item = chartBoardPreferences().find(card => card.id === id); if (!item) return;
+  if (control.dataset.profileCancel) { cancelPowerProfile(item); return; }
+  const snapshot = powerProfileSnapshot(item);
+  if (snapshot.validation) { chartBoardProfileError(id, snapshot.validation); document.querySelector(`[data-profile-from="${id}"]`)?.focus(); chartBoardProfileError(id, snapshot.validation); return; }
+  calculatePowerProfile(item, snapshot.status === 'ready');
+});
 document.addEventListener('change', event => {
   const target = event.target.closest('[data-board-duration],[data-board-metric],[data-board-activity],[data-board-basis],[data-board-grouping]');
   if (!target) return;

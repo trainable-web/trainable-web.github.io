@@ -88,7 +88,7 @@ function empiricalValid(value         , id        )                             
   const seen = new Set        ();
   for (const point of data.points) {
     if (!DURATIONS.includes(point.duration_s) || seen.has(point.duration_s) || !nonnegative(point.average_w) || point.average_w > 2500 ||
-      !nonnegative(point.from_s) || !nonnegative(point.to_s) || !near(point.to_s - point.from_s, point.duration_s) || !positiveInteger(point.candidate_count)) return false;
+      !nonnegative(point.from_s) || !nonnegative(point.to_s) || !near(point.to_s - point.from_s, point.duration_s) || !positiveInteger(point.candidate_count) || point.candidate_count > 200_000) return false;
     seen.add(point.duration_s);
   }
   return true;
@@ -122,6 +122,7 @@ function buildPeriodPowerEvidence(input       ) {
     .map(value => value.row).sort((a, b) => String(a.activity_id).localeCompare(String(b.activity_id)));
   if (rows.length > PERIOD_POWER_EVIDENCE_LIMIT) throw new RangeError('Choose at most 500 unique activity summaries.');
   const bins = new Map             (), bands = blankBands(), weeks = new Map              (), daily = new Map                ();
+  const opportunities = new Map(DURATIONS.map(duration_s => [duration_s, { duration_s, eligible_activities: 0, days: new Set        (), candidate_windows: 0 }]));
   const sources
                                                                                                                        = [];
   const totals = { covered_s: 0, recorded_span_s: 0, coverage_pct: 0, work_j: 0, zero_power_s: 0, interval_count: 0 };
@@ -162,6 +163,8 @@ function buildPeriodPowerEvidence(input       ) {
     if (empiricalValid(row.result, id)) {
       if (row.result.points.length) effortActivities++;
       for (const point of row.result.points) {
+        const opportunity = opportunities.get(point.duration_s) ;
+        opportunity.eligible_activities++; opportunity.days.add(day); opportunity.candidate_windows += point.candidate_count;
         const effort         = { ...point, day, activity_id: id, activity_name: name, start_date: start, quality: row.result.quality,
           algorithm_version: row.result.algorithm_id, flags: Array.isArray(row.result.flags) ? row.result.flags.filter(flag => typeof flag === 'string') : [],
           age_days_at_range_end: Math.round((Date.parse(to) - Date.parse(day)) / DAY_MS), record_in_selected_period: false };
@@ -195,7 +198,8 @@ function buildPeriodPowerEvidence(input       ) {
     intensity: { status: zoneActivities ? 'available' : 'unavailable', scheme_id: ZONE_SCHEME, measurement: 'recorded_cycling_power', coverage_limited: limited || zoneActivities < expected,
       grouping: 'activity_start_utc', bands, weeks: outputWeeks, coverage: zoneCoverage, sources: sources.filter(source => source.zones_available) },
     efforts: { status: points.length ? 'available' : 'unavailable', algorithm_version: EMPIRICAL_VERSION, coverage_limited: limited || effortActivities < expected, durations_s: [...DURATIONS],
-      points, bests: [...bests.values()].sort((a, b) => a.duration_s - b.duration_s) },
+      points, bests: [...bests.values()].sort((a, b) => a.duration_s - b.duration_s),
+      opportunities: [...opportunities.values()].map(({ duration_s, eligible_activities, days, candidate_windows }) => ({ duration_s, eligible_activities, eligible_days: days.size, candidate_windows })) },
     caveats: ['Results cover the returned eligible cycling recordings. Unavailable samples and activities do not become zero.',
       'Time and work shares use different denominators. Reference bands use each ride’s dated FTP; custom historical zones and session classification are not represented.',
       'Ride summaries are grouped by UTC start date. A ride crossing midnight or a week boundary remains in its start day/week.',
