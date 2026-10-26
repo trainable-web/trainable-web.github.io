@@ -88,7 +88,7 @@ function paintSettingsHistory() {
   root.innerHTML = settingsHistoryContents(entry);
   for (const disclosure of root.querySelectorAll('.sh-source')) { if (openSources.includes(disclosure.dataset.shSource)) disclosure.open = true; if (focusedSource === disclosure.dataset.shSource) disclosure.querySelector('summary')?.focus({preventScroll:true}); }
   const status = document.getElementById('settings-history-status');
-  if (status) status.textContent = entry.status === 'loading' ? entry.more ? 'Loading more dated settings.' : 'Loading dated settings.' : entry.status === 'ready' ? `${entry.rows.length} dated records loaded${entry.next ? '. More records are available.' : '.'}` : '';
+  if (status) status.textContent = entry.status === 'loading' ? entry.more ? 'Loading more dated settings.' : 'Loading dated settings.' : entry.status === 'ready' ? `${entry.rows.length} dated ${entry.rows.length === 1 ? 'record' : 'records'} loaded${entry.next ? '. More records are available.' : '.'}` : '';
   if (more) { const next = root.querySelector('[data-sh-more],[data-sh-export]'); next?.focus({preventScroll:true}); }
   if (refresh && !focused?.isConnected) document.querySelector('.sh-heading [data-sh-refresh]')?.focus({preventScroll:true});
 }
