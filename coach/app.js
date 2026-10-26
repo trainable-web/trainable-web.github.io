@@ -48,7 +48,7 @@ function saveSession(value) {
   try { localStorage.setItem(SESSION_KEY, saved); sessionStorage.removeItem(SESSION_KEY); return true; }
   catch { try { sessionStorage.setItem(SESSION_KEY, saved); } catch { /* In-memory session lasts until this page closes. */ } return false; }
 }
-function clearSession() { memorySession = null; try { localStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } try { sessionStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } }
+function clearSession() { if (typeof resetIntervalWorkbenchDrafts === 'function') resetIntervalWorkbenchDrafts(); memorySession = null; try { localStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } try { sessionStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } }
 function setStatus(message, isError = false, area = '#global-status') {
   const node = $(area); if (!node) return; node.textContent = message; node.classList.toggle('is-error', isError);
 }

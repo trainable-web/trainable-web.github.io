@@ -1,0 +1,69 @@
+/* Interval analysis lives in the activity page, with one natural vertical flow. */
+.interval-workbench { min-width: 0; }
+.iw-heading { margin: 8px 0 24px; }
+.iw-heading h3 { font-size: clamp(24px, 2.6vw, 32px); line-height: 1.15; letter-spacing: -.03em; margin: 0 0 8px; }
+.iw-heading p, .iw-section-heading p { margin: 0; color: var(--muted); line-height: 1.5; font-size: 14px; }
+.iw-section { padding: 28px 0; border-top: 1px solid var(--line); min-width: 0; }
+.iw-section h3 { margin: 0 0 8px; font-size: 21px; line-height: 1.25; }
+.iw-section .helper, .iw-timeline-tools .helper { max-width: 80ch; line-height: 1.55; font-size: 13px; }
+.iw-section-heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; margin-bottom: 14px; }
+.interval-workbench button, .interval-workbench summary, .iw-timeline-tools button { min-height: 44px; }
+.interval-workbench :is(button, input, select):focus-visible, .iw-timeline-tools button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.iw-add, .iw-cursor-actions { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.iw-add { margin-top: 18px; }
+.iw-add > label { flex: 1 1 230px; }
+.iw-add label, .iw-draft-fields label, .iw-detection-fields label { display: grid; gap: 6px; min-width: 0; font-size: 13px; line-height: 1.4; color: var(--muted); }
+.iw-add select, .iw-draft-fields input:not([type="checkbox"]), .iw-detection-fields input { width: 100%; min-width: 0; min-height: 44px; font-size: 14px; }
+#iw-draft-status { font-size: 13px; line-height: 1.5; margin: 12px 0; }
+#iw-draft-status:empty { margin: 0; }
+.iw-draft-row { padding: 18px 0; border-top: 1px solid var(--line); }
+.iw-draft-list { margin-top: 18px; }
+.iw-draft-fields { display: grid; grid-template-columns: auto minmax(140px, 1fr) minmax(90px, .45fr) minmax(90px, .45fr) auto auto; gap: 12px; align-items: end; }
+.iw-draft-fields .iw-select { display: flex; align-items: center; min-height: 44px; gap: 8px; cursor: pointer; }
+.iw-select input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; margin: 0; accent-color: #29513b; }
+.iw-select span { white-space: nowrap; }
+.iw-history { margin-top: 8px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.iw-history summary, .iw-measurement-detail > summary { cursor: pointer; padding-block: 12px; text-decoration: underline; text-underline-offset: 3px; }
+.iw-history p { margin: 6px 0; }
+.iw-history ol { padding-left: 20px; margin: 6px 0; }
+.iw-history li { margin-block: 6px; }
+.iw-history time { padding-left: 8px; }
+.iw-comparison-action { margin-top: 18px; }
+.iw-empty { color: var(--muted); max-width: 70ch; line-height: 1.6; font-size: 14px; padding-block: 12px; }
+.iw-detection-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 18px 0; }
+.iw-detected-list { margin-top: 14px; }
+.iw-detected-list > div { display: flex; flex-wrap: wrap; gap: 10px 20px; justify-content: space-between; align-items: center; padding-block: 12px; border-top: 1px solid var(--line); }
+.iw-detected-list > div > div { display: grid; gap: 6px; }
+.iw-detected-list strong { font-size: 14px; }
+.iw-detected-list span { font-size: 13px; color: var(--muted); }
+.iw-power-comparison { margin: 20px 0 8px; }
+.iw-power-comparison > button { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(60px, 2fr) max-content; align-items: center; gap: 16px; width: 100%; background: transparent; border: 0; border-radius: 0; padding: 12px 0; border-bottom: 1px solid var(--line); text-align: left; color: var(--ink); font-size: 14px; }
+.iw-power-comparison > button > span { overflow-wrap: anywhere; }
+.iw-power-comparison > button > i { height: 10px; background: #edf0e9; }
+.iw-power-comparison b { display: block; height: 100%; background: #29513b; }
+.iw-power-comparison strong { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 14px; }
+.iw-results .data-table-wrap { margin-block: 18px; }
+.iw-measurement-detail { margin-top: 20px; }
+.iw-measurement-detail > summary { font-size: 14px; }
+.iw-measurement-detail > section { padding-block: 16px; border-bottom: 1px solid var(--line); }
+.iw-measurement-detail h4 { font-size: 16px; margin: 0 0 8px; }
+.iw-measurement-detail p { font-size: 13px; line-height: 1.6; }
+.iw-timeline-tools { padding-top: 10px; }
+.iw-timeline-tools p { margin: 8px 0 0; }
+#iw-timeline-status { font-size: 13px; line-height: 1.5; }
+#trace-position-time { margin-left: 8px; font-variant-numeric: tabular-nums; font-weight: 700; }
+.iw-lap-marker { stroke: #586a78; stroke-width: 1; stroke-dasharray: 4 4; opacity: .7; }
+.iw-draft-marker { fill: #29513b; opacity: .7; }
+@media (max-width: 1100px) {
+  .iw-draft-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .iw-draft-fields .iw-name { grid-column: 1 / -1; grid-row: 1; }
+  .iw-draft-fields .iw-select { grid-column: 1 / -1; grid-row: 2; }
+  .iw-detection-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 540px) {
+  .iw-section { padding-block: 24px; }
+  .iw-add > button, .iw-cursor-actions > button { flex: 1 1 140px; }
+  .iw-detection-fields { grid-template-columns: 1fr; }
+  .iw-power-comparison > button { grid-template-columns: minmax(40px, 1fr) max-content; gap: 8px 14px; }
+  .iw-power-comparison > button > span { grid-column: 1 / -1; }
+}
