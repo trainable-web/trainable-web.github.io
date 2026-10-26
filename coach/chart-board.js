@@ -1,12 +1,15 @@
 /* Analytics / Reporting: independent, reusable chart instances on a saved workspace. */
 const CHART_BOARD_CATALOG = [
   { type: 'power', title: 'Power-duration curve', group: 'Performance', description: 'Measured best efforts across the period, with the exact source ride and interval.', size: 2 },
+  { type: 'recordedEfforts', title: 'Recorded effort progression', group: 'Performance', description: 'Daily best measured efforts, with exact source windows and records within the selected period.', size: 1 },
+  { type: 'periodDistribution', title: 'Period power distribution', group: 'Training', description: 'How recorded time and mechanical work are distributed across power outputs.', size: 1 },
+  { type: 'intensity', title: 'Training intensity', group: 'Training', description: 'Time and work in dated FTP reference bands, for the period or by week.', size: 1 },
   { type: 'load', title: 'Training load', group: 'Training', description: 'Recorded fitness, fatigue and form on one time axis.', size: 1 },
   { type: 'distribution', title: 'Power distribution', group: 'Activity', description: 'Time spent at each power output, weighted by recorded time.', size: 1, ride: true },
   { type: 'zones', title: 'Time in power zones', group: 'Activity', description: 'Reference bands using the FTP that applied on the ride date.', size: 1, ride: true },
   { type: 'ridePower', title: 'Activity power curve', group: 'Activity', description: 'Continuous recorded efforts from one ride, with source windows.', size: 1, ride: true },
   { type: 'laps', title: 'Lap comparison', group: 'Activity', description: 'Compare recorded lap power, heart rate and duration.', size: 1, ride: true },
-  { type: 'efforts', title: 'Best-effort progression', group: 'Performance', description: 'Daily best saved efforts at a duration you choose.', size: 1 },
+  { type: 'efforts', title: 'Saved effort progression', group: 'Performance', description: 'Legacy daily best saved efforts. Source intervals have not been revalidated.', size: 1 },
   { type: 'ramp', title: 'Ramp rate', group: 'Training', description: 'Seven-day change in the recorded CTL model.', size: 1 },
   { type: 'volume', title: 'Weekly training time', group: 'Training', description: 'Recorded hours by week, with the contributing sessions.', size: 1 },
   { type: 'comparison', title: 'Period comparison', group: 'Training', description: 'Compare time, distance and load with the previous equal period.', size: 2 },
@@ -28,12 +31,12 @@ const chartBoardScope = () => JSON.stringify([state.athleteId, analysis.trendReq
 
 function chartBoardPreferences() {
   const saved = chartBoardSession ?? readCoachPrefs().chartBoardV1;
-  const defaults = ['power', 'load', 'efforts', 'ramp', 'distribution', 'comparison'].map(type => ({ id: chartBoardId(), type, size: CHART_BOARD_CATALOG.find(chart => chart.type === type).size, duration: 300 }));
+  const defaults = ['power', 'load', 'recordedEfforts', 'ramp', 'distribution', 'comparison'].map(type => ({ id: chartBoardId(), type, size: CHART_BOARD_CATALOG.find(chart => chart.type === type).size, duration: 300 }));
   const seen = new Set();
   const result = (Array.isArray(saved) ? saved : defaults).filter(item => item && CHART_BOARD_CATALOG.some(chart => chart.type === item.type)).map(item => {
     const id = typeof item.id === 'string' && /^cb-[a-zA-Z0-9-]{1,80}$/.test(item.id) && !seen.has(item.id) ? item.id : chartBoardId();
     seen.add(id);
-    return { id, type: item.type, size: item.size === 2 ? 2 : 1, duration: CHART_EXPLORER_DURATIONS.some(([seconds]) => seconds === item.duration) ? item.duration : 300, activityId: typeof item.activityId === 'string' ? item.activityId.slice(0, 200) : '', metric: ['ctl', 'atl', 'tsb'].includes(item.metric) ? item.metric : 'all' };
+    return { id, type: item.type, size: item.size === 2 ? 2 : 1, duration: CHART_EXPLORER_DURATIONS.some(([seconds]) => seconds === item.duration) ? item.duration : 300, activityId: typeof item.activityId === 'string' ? item.activityId.slice(0, 200) : '', metric: ['ctl', 'atl', 'tsb'].includes(item.metric) ? item.metric : 'all', basis: item.basis === 'work' ? 'work' : 'time', grouping: item.grouping === 'weekly' ? 'weekly' : 'period' };
   });
   chartBoardSession = result;
   return result;
@@ -60,15 +63,84 @@ function chartBoardReadout(value, unit, label, note = '') {
 function chartBoardSourceWindow(point) {
   return `<button type="button" class="record-link" data-board-window="${safe(point.activity_id || '')}" data-window-from="${Number(point.from_s)}" data-window-to="${Number(point.to_s)}" data-window-watts="${Number(point.average_w)}">${safe(elapsedLabel(point.from_s))}–${safe(elapsedLabel(point.to_s))} ↗</button>`;
 }
+const CHART_BOARD_PERIOD_TYPES = ['power', 'recordedEfforts', 'periodDistribution', 'intensity'];
+function chartBoardPeriodState(titleText, description) {
+  const snapshot = typeof periodPowerSnapshot === 'function' ? periodPowerSnapshot() : { status: 'idle' };
+  const action = '<button type="button" class="primary" data-period-power-calculate>Calculate period charts</button>';
+  if (snapshot.status === 'loading') return { html: chartBoardNotice('Calculating period charts', `${numberLabel(snapshot.processed)} of ${numberLabel(snapshot.total)} eligible ride records checked. This calculation supplies every period power chart.`, '<button type="button" class="secondary" data-period-power-cancel>Stop calculation</button>'), loading: true };
+  if (snapshot.status === 'error') return { html: chartBoardNotice('The calculation did not finish', snapshot.error || 'Try again to request the recorded rides.', action) };
+  if (snapshot.status !== 'ready') return { html: chartBoardNotice(titleText, description, action) };
+  if (!snapshot.evidence) return { html: chartBoardNotice('Updated chart evidence is needed', 'Calculate again to request the recorded power and dated FTP evidence together.', action) };
+  return null;
+}
+function chartBoardPeriodCoverage(evidence, kind) {
+  const coverage = evidence.coverage;
+  const available = kind === 'intensity' ? coverage.zone_activities : kind === 'efforts' ? coverage.effort_activities : coverage.distribution_activities;
+  const description = kind === 'intensity' ? 'rides have dated FTP and usable power' : kind === 'efforts' ? 'rides have eligible continuous efforts' : 'rides have usable recorded power';
+  const limited = evidence[kind]?.coverage_limited ?? coverage.coverage_limited;
+  return `<p class="cb-evidence-coverage"><strong>${numberLabel(available)} of ${numberLabel(coverage.received_activities)} checked ${description}.</strong> ${coverage.received_activities > available ? `${numberLabel(coverage.received_activities - available)} unavailable for this chart.` : ''}${limited ? ' This chart has incomplete coverage.' : ''}${coverage.received_activities < coverage.expected_activities ? ` ${numberLabel(coverage.received_activities)} of ${numberLabel(coverage.expected_activities)} candidate ride records were checked.` : ''}</p>`;
+}
+function chartBoardBasisControl(item) {
+  return `<label class="cb-inline-field">Measure<select data-board-basis="${item.id}"><option value="time" ${item.basis !== 'work' ? 'selected' : ''}>Recorded time</option><option value="work" ${item.basis === 'work' ? 'selected' : ''}>Mechanical work</option></select></label>`;
+}
+function chartBoardPeriodActionMarkup() {
+  const snapshot = typeof periodPowerSnapshot === 'function' ? periodPowerSnapshot() : { status: 'idle' };
+  return snapshot.status === 'loading' ? '<button type="button" class="secondary" data-period-power-cancel>Stop calculation</button>' : `<button type="button" class="secondary" data-period-power-calculate>${snapshot.status === 'ready' ? 'Refresh period charts' : 'Calculate period charts'}</button>`;
+}
+function chartBoardPeriodStatusText() {
+  const snapshot = typeof periodPowerSnapshot === 'function' ? periodPowerSnapshot() : { status: 'idle' };
+  if (snapshot.status === 'loading') return `${numberLabel(snapshot.processed)} of ${numberLabel(snapshot.total)} ride records checked. One calculation updates every period power chart.`;
+  if (snapshot.status === 'ready') return `Period charts calculated from ${numberLabel(snapshot.processed)} ride records. Each chart shows its usable coverage.`;
+  if (snapshot.status === 'error') return 'The calculation did not finish. Try again to calculate the period charts.';
+  return 'Calculate once for the power curve, recorded progression, distribution and intensity.';
+}
+function chartBoardPeriodSources(sources, showFtp = false) {
+  return `<section class="cb-period-sources"><h4>Contributing rides</h4>${tableMarkup(['Ride date (UTC)', 'Source ride', 'Covered time', 'Recorded span', 'Mechanical work', ...(showFtp ? ['Dated FTP', 'Setting revision'] : [])], sources.map(source => [safe(utcLabel(source.start_date)), chartBoardSource(source), numberLabel(source.covered_s / 60, ' min', 1), numberLabel(source.recorded_span_s / 60, ' min', 1), numberLabel(source.work_j / 1000, ' kJ', 1), ...(showFtp ? [numberLabel(source.ftp_watts, ' W'), numberLabel(source.setting_revision)] : [])]), 'No eligible source rides.')}</section>`;
+}
+function chartBoardRecordedEfforts(item) {
+  const pending = chartBoardPeriodState('Follow measured efforts over time', 'Compare daily best efforts from consecutive recorded power samples, and inspect the exact winning interval.');
+  if (pending) return pending;
+  const evidence = periodPowerSnapshot().evidence;
+  const points = evidence.efforts.points.filter(point => point.duration_s === item.duration);
+  const best = evidence.efforts.bests.find(point => point.duration_s === item.duration);
+  const label = CHART_EXPLORER_DURATIONS.find(([seconds]) => seconds === item.duration)[1];
+  const controls = `<label class="cb-inline-field">Effort duration<select data-board-duration="${item.id}">${CHART_EXPLORER_DURATIONS.map(([seconds, name]) => `<option value="${seconds}" ${item.duration === seconds ? 'selected' : ''}>${name}</option>`).join('')}</select></label>`;
+  const chart = points.length ? dataChart([{ name: `${label} recorded daily best`, color: '#3467a0', points: points.map(point => [Date.parse(point.day), point.average_w]) }], `${label} recorded effort progression`, 'watts', Infinity, null, null, item.size === 1) : chartBoardNotice(`No recorded ${label} efforts`, 'Choose another duration or date range. This calculation requires consecutive recorded samples; gaps are not filled in.');
+  return { html: controls + (best ? chartBoardReadout(numberLabel(best.average_w, '', 1), 'W', `Best recorded ${label} in selected period`, `${best.age_days_at_range_end} days before the period’s end`) : '') + chart + chartBoardPeriodCoverage(evidence, 'efforts'), headers: ['Date (UTC)', 'Recorded power (W)', 'Source ride', 'Source window', 'Eligible windows', 'Period record', 'Age at period end', 'Recording quality'], rows: points.map(point => [safe(utcLabel(point.day)), numberLabel(point.average_w, '', 1), chartBoardSource(point), chartBoardSourceWindow(point), numberLabel(point.candidate_count), point.record_in_selected_period ? 'New best within selected period' : '—', numberLabel(point.age_days_at_range_end, ' days'), safe(point.quality)]), notes: ['Each point is the best observed effort on that UTC day. The line joins recorded days; it does not estimate missing efforts.', 'A period record means a new best within the selected dates. It is not an all-time personal best.', ...evidence.caveats] };
+}
+function chartBoardPeriodDistribution(item) {
+  const pending = chartBoardPeriodState('See where the period’s power went', 'Combine recorded power across the selected rides. Compare time at each output with the mechanical work it produced.');
+  if (pending) return pending;
+  const evidence = periodPowerSnapshot().evidence, distribution = evidence.distribution;
+  const work = item.basis === 'work', totals = distribution.totals;
+  const chart = distribution.status === 'available' ? chartBoardHistogram(distribution.bins, item.basis) : chartBoardNotice('No usable power distributions', 'Try a period with recorded power-meter rides. Missing ride data is not counted as zero power.');
+  return { html: chartBoardBasisControl(item) + chart + `<p class="cb-caption">${numberLabel(totals.covered_s / 3600, ' h', 2)} recorded time · ${numberLabel(totals.work_j / 1000, ' kJ', 1)} mechanical work. ${numberLabel(totals.coverage_pct, '%', 1)} of the returned usable recordings’ span is covered.${work && totals.work_j === 0 ? ' Work shares are unavailable because total work is zero.' : ''}</p>` + chartBoardPeriodCoverage(evidence, 'distribution'), headers: ['From power (W)', 'To power, exclusive (W)', 'Covered time', 'Time share', 'Mechanical work', 'Work share'], rows: distribution.bins.map(bin => [numberLabel(bin.lower_w), numberLabel(bin.upper_w), numberLabel(bin.duration_s / 60, ' min', 2), numberLabel(bin.share_pct, '%', 2), numberLabel(bin.work_j / 1000, ' kJ', 2), numberLabel(bin.work_share_pct, '%', 2)]), extra: chartBoardPeriodSources(distribution.sources), notes: ['Time shares use total covered seconds. Work shares use total covered mechanical joules. The two answer different questions.', 'This is recorded cycling power, not exercise energy expenditure or fuel consumption.', ...evidence.caveats] };
+}
+function chartBoardIntensity(item) {
+  const pending = chartBoardPeriodState('Compare the intensity of recorded training', 'Use each ride’s dated FTP to compare reference-band time and mechanical work, across the period or by week.');
+  if (pending) return pending;
+  const evidence = periodPowerSnapshot().evidence, intensity = evidence.intensity, coverage = intensity.coverage, work = item.basis === 'work';
+  const value = band => work ? band.work_j / 1000 : band.duration_s / 60;
+  const share = band => work ? band.work_share_pct : band.share_pct;
+  const unit = work ? ' kJ' : ' min';
+  const controls = `<div class="cb-intensity-controls">${chartBoardBasisControl(item)}<label class="cb-inline-field">View<select data-board-grouping="${item.id}"><option value="period" ${item.grouping !== 'weekly' ? 'selected' : ''}>Selected period</option><option value="weekly" ${item.grouping === 'weekly' ? 'selected' : ''}>Week by week</option></select></label></div>`;
+  const totalBands = `<div class="cb-zones cb-period-intensity-bands">${intensity.bands.map((band, index) => `<div><span>${safe(band.label)}</span><i class="cb-zone-${index}" style="--bar-width:${Math.max(0, Math.min(100, share(band) || 0))}%" aria-hidden="true"></i><strong>${numberLabel(share(band), '%', 1)}${chartBoardExpanded === item.id ? `<small>${numberLabel(value(band), unit, 1)}</small>` : ''}</strong></div>`).join('')}</div>`;
+  const visibleWeeks = chartBoardExpanded === item.id ? intensity.weeks : intensity.weeks.slice(-8);
+  const weeks = `<div class="cb-intensity-weeks">${visibleWeeks.map(week => `<div><span>${safe(utcLabel(week.week_start))}</span><div class="cb-stacked-band" role="img" aria-label="${safe(week.bands.map(band => `${band.label}: ${numberLabel(value(band), unit, 1)}, ${numberLabel(share(band), '%', 1)}`).join('. '))}">${week.bands.map((band, index) => `<i class="cb-zone-${index}" style="width:${Math.max(0, Math.min(100, share(band) || 0))}%" title="${safe(band.label)}: ${numberLabel(value(band), unit, 1)} (${numberLabel(share(band), '%', 1)})"></i>`).join('')}</div><strong>${numberLabel(work ? week.work_j / 1000 : week.covered_s / 60, unit, 1)}</strong></div>`).join('')}</div><div class="cb-band-legend">${intensity.bands.map((band, index) => `<span><i class="cb-zone-${index}" aria-hidden="true"></i>${safe(band.label)}</span>`).join('')}</div>${intensity.weeks.length > visibleWeeks.length ? `<p class="cb-caption">Latest ${visibleWeeks.length} of ${intensity.weeks.length} recorded weeks. Inspect data to see all weeks.</p>` : ''}`;
+  const chart = intensity.status === 'available' ? item.grouping === 'weekly' ? weeks : totalBands : chartBoardNotice('Dated FTP is needed for intensity', 'These bands need a verified FTP for each ride’s date. Add Period power distribution to inspect recorded watts when dated FTP is unavailable.', '<button type="button" class="record-link" data-board-add="periodDistribution">Add period power distribution</button>');
+  const rows = item.grouping === 'weekly' ? intensity.weeks.flatMap(week => week.bands.map(band => [safe(utcLabel(week.week_start)), safe(band.label), numberLabel(band.duration_s / 60, ' min', 2), numberLabel(band.share_pct, '%', 2), numberLabel(band.work_j / 1000, ' kJ', 2), numberLabel(band.work_share_pct, '%', 2)])) : intensity.bands.map(band => [safe(band.label), numberLabel(band.duration_s / 60, ' min', 2), numberLabel(band.share_pct, '%', 2), numberLabel(band.work_j / 1000, ' kJ', 2), numberLabel(band.work_share_pct, '%', 2)]);
+  return { html: controls + chart + `<p class="cb-caption"><strong>${numberLabel(coverage.zoned_s / 3600, ' h', 2)} has dated FTP.</strong> ${coverage.missing_ftp_s > 0 ? `${numberLabel(coverage.missing_ftp_s / 3600, ' h', 2)} and ${numberLabel(coverage.missing_ftp_work_j / 1000, ' kJ', 1)} are excluded because dated FTP is unavailable.` : 'All covered power time has dated FTP.'}${work && coverage.work_j === 0 ? ' Work shares are unavailable because covered work is zero.' : ''}</p>` + chartBoardPeriodCoverage(evidence, 'intensity'), headers: [...(item.grouping === 'weekly' ? ['Week starts (UTC)'] : []), 'Reference band', 'Covered time', 'Time share', 'Mechanical work', 'Work share'], rows: intensity.status === 'available' ? rows : [], extra: chartBoardPeriodSources(intensity.sources, true), notes: ['Fixed reference FTP bands use the FTP valid on each ride date. Current FTP is never substituted; custom historical zone definitions are not represented.', 'Time shares use zoned recorded seconds. Work shares use zoned mechanical joules. This is not session-based intensity classification.', ...evidence.caveats] };
+}
 function chartBoardPower(item) {
   const snapshot = typeof periodPowerSnapshot === 'function' ? periodPowerSnapshot() : { status: 'idle' };
-  const action = `<button type="button" class="primary" data-period-power-calculate>${snapshot.status === 'ready' ? 'Recalculate period' : 'Calculate recorded efforts'}</button>`;
+  const coverageLimited = snapshot.evidence?.efforts?.coverage_limited ?? snapshot.coverage_limited;
+  const action = `<button type="button" class="primary" data-period-power-calculate>${snapshot.status === 'ready' ? 'Refresh period charts' : 'Calculate period charts'}</button>`;
   const points = snapshot.status === 'ready' ? snapshot.points || [] : [];
   let html;
-  if (snapshot.status === 'loading') html = chartBoardNotice('Calculating recorded efforts', `${numberLabel(snapshot.processed)} of ${numberLabel(snapshot.total)} eligible activity records checked.`, '<button type="button" class="secondary" data-period-power-cancel>Stop calculation</button>');
+  if (snapshot.status === 'loading') html = chartBoardNotice('Calculating period charts', `${numberLabel(snapshot.processed)} of ${numberLabel(snapshot.total)} eligible activity records checked.`, '<button type="button" class="secondary" data-period-power-cancel>Stop calculation</button>');
   else if (snapshot.status === 'error') html = chartBoardNotice('The calculation did not finish', snapshot.error || 'Try again to request the recorded activity streams.', action);
   else if (snapshot.status !== 'ready') html = chartBoardNotice('Find the best recorded efforts', 'Calculate this period from the recorded power samples. Each result links to its winning ride and time window.', action);
-  else html = `${points.length ? powerDurationChart(points.map(point => ({ seconds: point.duration_s, watts: point.average_w })), item.size === 1) : chartBoardNotice('No continuous recorded efforts', 'The returned rides need confirmed power-meter data and consecutive samples. Try a different date range.', action)}<p class="cb-caption">${numberLabel(snapshot.processed - snapshot.unavailable_activities)} rides with eligible efforts · ${numberLabel(snapshot.unavailable_activities)} unavailable${snapshot.coverage_limited ? ' · Incomplete period coverage' : ''}</p>${points.length ? chartBoardExpanded === item.id ? action : '<button type="button" class="record-link" data-period-power-calculate>Refresh recorded efforts</button>' : ''}`;
+  else html = `${points.length ? powerDurationChart(points.map(point => ({ seconds: point.duration_s, watts: point.average_w })), item.size === 1) : chartBoardNotice('No continuous recorded efforts', 'The returned rides need confirmed power-meter data and consecutive samples. Try a different date range.', action)}<p class="cb-caption">${numberLabel(snapshot.processed - snapshot.unavailable_activities)} rides with eligible efforts · ${numberLabel(snapshot.unavailable_activities)} unavailable${coverageLimited ? ' · Incomplete period coverage' : ''}</p>${points.length ? chartBoardExpanded === item.id ? action : '<button type="button" class="record-link" data-period-power-calculate>Refresh period charts</button>' : ''}`;
   return { html, headers: ['Effort duration', 'Recorded power (W)', 'Source ride', 'Source window (elapsed)', 'Eligible windows'], rows: points.map(point => [elapsedLabel(point.duration_s), numberLabel(point.average_w, '', 1), chartBoardSource(point), chartBoardSourceWindow(point), numberLabel(point.candidate_count)]), notes: snapshot.caveats || ['The curve shows observed efforts from eligible recorded samples. It is not a prediction or physiological model.', 'Missing samples and known pauses break an effort. The last source-window boundary is exclusive.'] };
 }
 function chartBoardSavedPower(item) {
@@ -120,11 +192,12 @@ function chartBoardSleep(item) {
   const t = analysis.trends || {}, readiness = t.readiness || [], wellness = t.wellness || [];
   return { html: dataChart([{ name: 'Trainable sleep', color: '#8253aa', points: readiness.map(row => [Date.parse(row.metric_date), explorerNumber(row.sleep_hours)]) }, { name: 'Intervals.icu sleep', color: '#2d806a', points: wellness.map(row => [Date.parse(row.day), explorerNumber(row.sleep_s) == null ? null : row.sleep_s / 3600]) }], 'Sleep duration', 'hours', 129600000, null, null, item.size === 1), headers: ['Date (UTC)', 'Source', 'Sleep (hours)'], rows: [...readiness.map(row => [safe(utcLabel(row.metric_date)), 'Trainable', numberLabel(row.sleep_hours, '', 1)]), ...wellness.map(row => [safe(utcLabel(row.day)), 'Intervals.icu', numberLabel(explorerNumber(row.sleep_s) == null ? null : row.sleep_s / 3600, '', 1)])], notes: ['Measurement methods can differ by source and device. Missing observations remain gaps.'] };
 }
-function chartBoardHistogram(bins) {
+function chartBoardHistogram(bins, basis = 'time') {
+  const work = basis === 'work', value = bin => work ? bin.work_j / 1000 : bin.duration_s / 60, unit = work ? ' kJ' : ' min';
   const width = Math.max(280, document.getElementById('analysis-content')?.clientWidth || 800), left = 48, right = width - 16, top = 20, bottom = 190;
-  const maximum = Math.max(1, ...bins.map(bin => bin.duration_s / 60)), maxWatts = Math.max(25, ...bins.map(bin => bin.upper_w));
+  const maximum = Math.max(1, ...bins.map(value)), maxWatts = Math.max(25, ...bins.map(bin => bin.upper_w));
   const x = watts => left + watts / maxWatts * (right - left), y = minutes => bottom - minutes / maximum * (bottom - top);
-  return `<div class="cb-histogram chart-frame"><svg class="data-chart" data-responsive-chart data-chart-left="48" data-chart-right="16" viewBox="0 0 ${width} 234" role="img" aria-label="Recorded time in 25-watt bins. Focus or point at a bar to read its value."><title>Time by recorded power output</title>${[0, .5, 1].map(fraction => `<line x1="${left}" x2="${right}" y1="${y(maximum * fraction)}" y2="${y(maximum * fraction)}"/><text x="${left - 8}" y="${y(maximum * fraction) + 4}" text-anchor="end">${numberLabel(maximum * fraction, '', 1)}</text>`).join('')}${bins.filter(bin => bin.duration_s > 0).map(bin => { const label = `${bin.lower_w}–${bin.upper_w} W: ${numberLabel(bin.duration_s / 60, ' min', 1)} (${numberLabel(bin.share_pct, '%', 1)} of covered time)`; return `<path class="cb-bin" tabindex="0" role="img" aria-label="${safe(label)}" data-board-bin="${safe(label)}" d="M${x(bin.lower_w) + 1},${bottom} L${x(bin.lower_w) + 1},${y(bin.duration_s / 60)} L${Math.max(x(bin.lower_w) + 2, x(bin.upper_w) - 1)},${y(bin.duration_s / 60)} L${Math.max(x(bin.lower_w) + 2, x(bin.upper_w) - 1)},${bottom} Z"><title>${safe(label)}</title></path>`; }).join('')}${[0, .5, 1].map(fraction => `<text data-chart-tick x="${x(maxWatts * fraction)}" y="211" text-anchor="${fraction === 0 ? 'start' : fraction === 1 ? 'end' : 'middle'}">${numberLabel(maxWatts * fraction)} W</text>`).join('')}<text x="${left}" y="14">Minutes</text></svg><p class="cb-bin-reading" role="status">Point at a bar or use Tab to inspect each power range.</p></div>`;
+  return `<div class="cb-histogram chart-frame"><svg class="data-chart" data-responsive-chart data-chart-left="48" data-chart-right="16" viewBox="0 0 ${width} 234" role="img" aria-label="Recorded ${work ? 'mechanical work' : 'time'} in 25-watt bins. Focus or point at a bar to read its value."><title>${work ? 'Mechanical work' : 'Time'} by recorded power output</title>${[0, .5, 1].map(fraction => `<line x1="${left}" x2="${right}" y1="${y(maximum * fraction)}" y2="${y(maximum * fraction)}"/><text x="${left - 8}" y="${y(maximum * fraction) + 4}" text-anchor="end">${numberLabel(maximum * fraction, '', 1)}</text>`).join('')}${bins.filter(bin => bin.duration_s > 0).map(bin => { const label = `${bin.lower_w}–${bin.upper_w} W: ${numberLabel(value(bin), unit, 1)} (${numberLabel(work ? bin.work_share_pct : bin.share_pct, '%', 1)} of covered ${work ? 'work' : 'time'})`; return `<path class="cb-bin" tabindex="0" role="img" aria-label="${safe(label)}" data-board-bin="${safe(label)}" d="M${x(bin.lower_w) + 1},${bottom} L${x(bin.lower_w) + 1},${y(value(bin))} L${Math.max(x(bin.lower_w) + 2, x(bin.upper_w) - 1)},${y(value(bin))} L${Math.max(x(bin.lower_w) + 2, x(bin.upper_w) - 1)},${bottom} Z"><title>${safe(label)}</title></path>`; }).join('')}${[0, .5, 1].map(fraction => `<text data-chart-tick x="${x(maxWatts * fraction)}" y="211" text-anchor="${fraction === 0 ? 'start' : fraction === 1 ? 'end' : 'middle'}">${numberLabel(maxWatts * fraction)} W</text>`).join('')}<text x="${left}" y="14">${work ? 'Kilojoules' : 'Minutes'}</text></svg><p class="cb-bin-reading" role="status">Point at a bar or use Tab to inspect each power range.</p></div>`;
 }
 function chartBoardRide(item) {
   const activity = chartBoardActivity(item), entry = chartBoardDetail(item);
@@ -154,12 +227,12 @@ function chartBoardResult(item) {
   if (!analysis.trends) return { html: chartBoardNotice('Loading the selected period…', 'Each chart will appear as its source data arrives.'), loading: true };
   if (analysis.trends.error) return { html: chartBoardNotice('Could not load this period', analysis.trends.error, '<button type="button" class="secondary" data-analysis-retry="charts">Try again</button>') };
   if (CHART_BOARD_CATALOG.find(chart => chart.type === item.type)?.ride) return chartBoardRide(item);
-  const render = { power: chartBoardPower, savedPower: chartBoardSavedPower, load: chartBoardLoad, ramp: chartBoardRamp, efforts: chartBoardEfforts, volume: chartBoardVolume, comparison: chartBoardComparison, sleep: chartBoardSleep }[item.type];
+  const render = { power: chartBoardPower, recordedEfforts: chartBoardRecordedEfforts, periodDistribution: chartBoardPeriodDistribution, intensity: chartBoardIntensity, savedPower: chartBoardSavedPower, load: chartBoardLoad, ramp: chartBoardRamp, efforts: chartBoardEfforts, volume: chartBoardVolume, comparison: chartBoardComparison, sleep: chartBoardSleep }[item.type];
   return render ? render(item) : { html: '' };
 }
 function chartBoardBody(item) {
   const result = chartBoardResult(item), expanded = chartBoardExpanded === item.id;
-  return `<div class="cb-chart-content" ${result.loading ? 'aria-busy="true"' : ''}>${result.html}</div>${expanded ? `<section class="cb-source-data"><div class="cb-source-heading"><div><h4>Source data</h4><p>Missing values appear as — · Dates in UTC</p></div><button type="button" class="secondary" data-board-export="${item.id}">Export data (CSV)</button></div>${tableMarkup(result.headers || ['Availability'], result.rows || [], 'No source rows are available for this chart.')}<div class="cb-method"><h4>How to read this chart</h4><ul>${(result.notes || ['Open the source activity to inspect the recorded measurements.']).map(note => `<li>${safe(note)}</li>`).join('')}</ul></div></section>` : ''}`;
+  return `<div class="cb-chart-content" ${result.loading ? 'aria-busy="true"' : ''}>${result.html}</div>${expanded ? `<section class="cb-source-data"><div class="cb-source-heading"><div><h4>Source data</h4><p>Missing values appear as — · Dates in UTC</p></div><button type="button" class="secondary" data-board-export="${item.id}">Export data (CSV)</button></div>${tableMarkup(result.headers || ['Availability'], result.rows || [], 'No source rows are available for this chart.')}${result.extra || ''}<div class="cb-method"><h4>How to read this chart</h4><ul>${(result.notes || ['Open the source activity to inspect the recorded measurements.']).map(note => `<li>${safe(note)}</li>`).join('')}</ul></div></section>` : ''}`;
 }
 // Period calculations update their own cards without disturbing other charts or controls.
 // deno-lint-ignore no-unused-vars
@@ -168,11 +241,17 @@ function chartBoardRefreshPower() {
   const focused = document.activeElement;
   const focusCard = focused?.closest('[data-board-card]')?.dataset.boardCard;
   const focusWasAction = Boolean(focused?.matches('[data-period-power-calculate],[data-period-power-cancel]'));
-  for (const item of chartBoardPreferences().filter(card => card.type === 'power')) {
+  const focusWasToolbar = Boolean(focused?.closest('.cb-period-run'));
+  for (const item of chartBoardPreferences().filter(card => CHART_BOARD_PERIOD_TYPES.includes(card.type))) {
     const body = document.querySelector(`[data-board-card="${item.id}"] .cb-card-body`);
     if (body) body.innerHTML = chartBoardBody(item);
   }
+  const actions = document.querySelector('.cb-period-actions');
+  if (actions) actions.innerHTML = chartBoardPeriodActionMarkup();
+  const status = document.getElementById('period-chart-status');
+  if (status) status.textContent = chartBoardPeriodStatusText();
   if (focusWasAction && focusCard) document.querySelector(`[data-board-card="${focusCard}"] [data-period-power-cancel], [data-board-card="${focusCard}"] [data-period-power-calculate]`)?.focus({ preventScroll: true });
+  else if (focusWasToolbar) actions?.querySelector('button')?.focus({ preventScroll: true });
 }
 function chartBoardExportEvidence(item) {
   const evidence = chartExplorerEvidence(), detail = chartBoardDetail(item)?.detail, activity = chartBoardActivity(item), t = analysis.trends || {};
@@ -180,7 +259,25 @@ function chartBoardExportEvidence(item) {
   if (item.type === 'power') {
     const snapshot = typeof periodPowerSnapshot === 'function' ? periodPowerSnapshot() : {};
     headers = ['duration_s', 'average_w', 'activity_id', 'activity_name', 'source_from_s', 'source_to_s_exclusive', 'candidate_count', 'algorithm_version', 'processed_activities', 'unavailable_activities', 'coverage_limited'];
-    if (snapshot.status === 'ready') rows = (snapshot.points || []).map(point => [point.duration_s, point.average_w, point.activity_id, point.activity_name, point.from_s, point.to_s, point.candidate_count, point.algorithm_version, snapshot.processed, snapshot.unavailable_activities, snapshot.coverage_limited]);
+    if (snapshot.status === 'ready') rows = (snapshot.points || []).map(point => [point.duration_s, point.average_w, point.activity_id, point.activity_name, point.from_s, point.to_s, point.candidate_count, point.algorithm_version, snapshot.processed, snapshot.unavailable_activities, snapshot.evidence?.efforts?.coverage_limited ?? snapshot.coverage_limited]);
+  } else if (CHART_BOARD_PERIOD_TYPES.includes(item.type)) {
+    const snapshot = typeof periodPowerSnapshot === 'function' ? periodPowerSnapshot() : {};
+    const period = snapshot.status === 'ready' ? snapshot.evidence : null;
+    if (period && item.type === 'recordedEfforts') {
+      headers = ['date_utc', 'duration_s', 'average_w', 'activity_id', 'activity_name', 'source_from_s', 'source_to_s_exclusive', 'candidate_count', 'quality', 'flags', 'record_in_selected_period', 'age_days_at_range_end', 'algorithm_version', 'effort_activities', 'unavailable_effort_activities', 'coverage_limited', 'evidence_version'];
+      rows = period.efforts.points.filter(point => point.duration_s === item.duration).map(point => [point.day, point.duration_s, point.average_w, point.activity_id, point.activity_name, point.from_s, point.to_s, point.candidate_count, point.quality, point.flags.join('; '), point.record_in_selected_period, point.age_days_at_range_end, point.algorithm_version, period.coverage.effort_activities, period.coverage.unavailable_effort_activities, period.efforts.coverage_limited, period.version]);
+    } else if (period && item.type === 'periodDistribution') {
+      const distribution = period.distribution, totals = distribution.totals;
+      headers = ['row_kind', 'lower_w_inclusive', 'upper_w_exclusive', 'duration_s', 'time_share_pct', 'work_j', 'work_share_pct', 'interval_count', 'activity_id', 'activity_name', 'activity_start_utc', 'recorded_span_s', 'total_covered_s', 'total_work_j', 'total_recorded_span_s', 'recorded_span_coverage_pct', 'usable_activity_count', 'unavailable_activity_count', 'coverage_limited', 'algorithm_version', 'evidence_version'];
+      const metadata = [totals.covered_s, totals.work_j, totals.recorded_span_s, totals.coverage_pct, period.coverage.distribution_activities, period.coverage.unavailable_distribution_activities, distribution.coverage_limited, distribution.algorithm_version, period.version];
+      rows = [...distribution.bins.map(bin => ['power_bin', bin.lower_w, bin.upper_w, bin.duration_s, bin.share_pct, bin.work_j, bin.work_share_pct, bin.interval_count, null, null, null, null, ...metadata]), ...distribution.sources.map(source => ['source_ride', null, null, source.covered_s, null, source.work_j, null, null, source.activity_id, source.activity_name, source.start_date, source.recorded_span_s, ...metadata])];
+    } else if (period && item.type === 'intensity') {
+      const intensity = period.intensity;
+      headers = ['row_kind', 'week_from_utc', 'week_to_utc', 'reference_band_key', 'reference_band', 'duration_s', 'time_share_pct', 'work_j', 'work_share_pct', 'activity_id', 'activity_name', 'activity_start_utc', 'dated_ftp_w', 'setting_id', 'setting_revision', 'dated_ftp_available', 'zoned_s', 'missing_ftp_s', 'zoned_work_j', 'missing_ftp_work_j', 'coverage_limited', 'scheme_id', 'evidence_version'];
+      const metadata = [intensity.coverage.zoned_s, intensity.coverage.missing_ftp_s, intensity.coverage.work_j, intensity.coverage.missing_ftp_work_j, intensity.coverage_limited, intensity.scheme_id, period.version];
+      const bandRow = (band, week = null) => [week ? 'weekly_reference_band' : 'period_reference_band', week?.from, week?.to, band.key, band.label, band.duration_s, band.share_pct, band.work_j, band.work_share_pct, null, null, null, null, null, null, null, ...metadata];
+      rows = [...(item.grouping === 'weekly' ? intensity.weeks.flatMap(week => week.bands.map(band => bandRow(band, week))) : intensity.status === 'available' ? intensity.bands.map(band => bandRow(band)) : []), ...period.distribution.sources.map(source => ['source_ride', null, null, null, null, source.covered_s, null, source.work_j, null, source.activity_id, source.activity_name, source.start_date, source.ftp_watts, source.setting_id, source.setting_revision, source.zones_available, ...metadata])];
+    }
   } else if (item.type === 'ramp') {
     headers = ['date_utc', 'ctl_change_per_7_days', 'baseline_date_utc', 'baseline_ctl', 'current_ctl', 'evidence_version'];
     rows = (evidence?.ramp?.points || []).map(point => [point.day, point.value, point.from_day, point.from_ctl, point.to_ctl, evidence.version]);
@@ -244,12 +341,14 @@ function paintChartBoard() {
   const search = container.querySelector('[data-board-search]')?.value || '';
   const active = document.activeElement?.closest('[data-board-card]');
   const focusCard = active?.dataset.boardCard;
-  container.innerHTML = `<section class="chart-board" aria-labelledby="chart-board-title"><header class="cb-heading"><div><p class="eyebrow">YOUR ANALYSIS WORKSPACE</p><h3 id="chart-board-title">Chart board</h3><p>Put the important questions side by side.</p></div><div class="cb-workspace-note"><strong>${items.length} ${items.length === 1 ? 'chart' : 'charts'}</strong><span>Layout saved in this browser</span></div></header>${rangeForm()}<div class="cb-toolbar">${chartBoardCatalogMarkup()}<p>Drag the grip to arrange. Use each chart’s menu to resize or move.</p></div><div id="chart-board-status" class="cb-status" role="status" aria-live="polite">${chartBoardUndo ? 'Chart removed. <button type="button" class="record-link" data-board-undo>Undo removal</button>' : ''}</div>${analysis.trends?.coverage_limited ? '<p class="explorer-data-warning">The returned activity list is incomplete. Narrow the selected period for complete coverage.</p>' : ''}<div class="cb-grid">${items.map((item, index) => chartBoardCard(item, index, items.length)).join('')}</div>${!items.length ? '<div class="cb-empty"><h4>Your chart board is ready</h4><p>Add the charts you want to review together. You can start with one and grow from there.</p><button type="button" class="primary" data-board-open-catalog>Add your first chart</button></div>' : ''}</section>`;
+  container.innerHTML = `<section class="chart-board" aria-labelledby="chart-board-title"><header class="cb-heading"><div><p class="eyebrow">YOUR ANALYSIS WORKSPACE</p><h3 id="chart-board-title">Chart board</h3><p>Put the important questions side by side.</p></div><div class="cb-workspace-note"><strong>${items.length} ${items.length === 1 ? 'chart' : 'charts'}</strong><span>Layout saved in this browser</span></div></header>${rangeForm()}<div class="cb-toolbar">${chartBoardCatalogMarkup()}<p>Drag the grip to arrange. Use each chart’s menu to resize or move.</p></div>${items.some(item => CHART_BOARD_PERIOD_TYPES.includes(item.type)) ? `<div class="cb-period-run"><div class="cb-period-actions">${chartBoardPeriodActionMarkup()}</div><p id="period-chart-status" role="status" aria-live="polite"></p></div>` : ''}<div id="chart-board-status" class="cb-status" role="status" aria-live="polite">${chartBoardUndo ? 'Chart removed. <button type="button" class="record-link" data-board-undo>Undo removal</button>' : ''}</div>${analysis.trends?.coverage_limited ? '<p class="explorer-data-warning">The returned activity list is incomplete. Narrow the selected period for complete coverage.</p>' : ''}<div class="cb-grid">${items.map((item, index) => chartBoardCard(item, index, items.length)).join('')}</div>${!items.length ? '<div class="cb-empty"><h4>Your chart board is ready</h4><p>Add the charts you want to review together. You can start with one and grow from there.</p><button type="button" class="primary" data-board-open-catalog>Add your first chart</button></div>' : ''}</section>`;
   const catalog = container.querySelector('.cb-catalog');
   catalog.open = catalogOpen;
   const input = container.querySelector('[data-board-search]');
   input.value = search;
   chartBoardFilterCatalog(search);
+  const periodStatus = container.querySelector('#period-chart-status');
+  if (periodStatus) periodStatus.textContent = chartBoardPeriodStatusText();
   chartBoardObserve(container);
   if (focusCard) container.querySelector(`[data-board-drag="${focusCard}"]`)?.focus({ preventScroll: true });
 }
@@ -317,14 +416,16 @@ function chartBoardMove(id, direction) {
 }
 document.addEventListener('input', event => { if (event.target.matches('[data-board-search]')) chartBoardFilterCatalog(event.target.value); });
 document.addEventListener('change', event => {
-  const target = event.target.closest('[data-board-duration],[data-board-metric],[data-board-activity]');
+  const target = event.target.closest('[data-board-duration],[data-board-metric],[data-board-activity],[data-board-basis],[data-board-grouping]');
   if (!target) return;
-  const id = target.dataset.boardDuration || target.dataset.boardMetric || target.dataset.boardActivity;
+  const id = target.dataset.boardDuration || target.dataset.boardMetric || target.dataset.boardActivity || target.dataset.boardBasis || target.dataset.boardGrouping;
   const items = chartBoardPreferences(), item = items.find(card => card.id === id);
   if (!item) return;
-  const attribute = target.hasAttribute('data-board-duration') ? 'data-board-duration' : target.hasAttribute('data-board-metric') ? 'data-board-metric' : 'data-board-activity';
+  const attribute = ['data-board-duration', 'data-board-metric', 'data-board-activity', 'data-board-basis', 'data-board-grouping'].find(name => target.hasAttribute(name));
   if (target.hasAttribute('data-board-duration')) item.duration = Number(target.value);
   else if (target.hasAttribute('data-board-metric')) item.metric = target.value;
+  else if (target.hasAttribute('data-board-basis')) item.basis = target.value;
+  else if (target.hasAttribute('data-board-grouping')) item.grouping = target.value;
   else item.activityId = target.value;
   chartBoardSave(items); paintChartBoard(); document.querySelector(`[${attribute}="${id}"]`)?.focus({ preventScroll: true });
 });
@@ -340,11 +441,7 @@ document.addEventListener('click', async event => {
     const athlete = state.athleteId, from = Number(button.dataset.windowFrom), to = Number(button.dataset.windowTo), watts = Number(button.dataset.windowWatts);
     await openActivity(button.dataset.boardWindow);
     if (athlete !== state.athleteId || analysis.detail?.activity?.id !== button.dataset.boardWindow) return;
-    analysis.traceRange = [from, Math.min(to, analysis.detail.stream_duration_s || to)];
-    setActivityPanel('analyze');
-    const result = document.getElementById('segment-result');
-    if (result) result.innerHTML = `<p>Recorded source effort: <strong>${numberLabel(watts, ' W', 1)}</strong> over ${elapsedLabel(from)}–${elapsedLabel(to)}. The last boundary is exclusive. Use the interval controls to inspect the recorded time.</p>`;
-    document.getElementById('tab-analyze')?.focus(); return;
+    focusRecordedPowerWindow(from, to, watts); return;
   }
   if (button.dataset.boardExport) {
     const item = items.find(card => card.id === button.dataset.boardExport); if (!item) return;

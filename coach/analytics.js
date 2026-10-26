@@ -740,6 +740,19 @@ function paintTraceBrush() {
     svg.append(group);
   });
 }
+function focusRecordedPowerWindow(from, to, watts) {
+  const duration = analysis.detail?.stream_duration_s;
+  const end = Number.isFinite(duration) ? Math.min(to, duration) : to;
+  if (![from, to, watts, end].every(Number.isFinite) || from < 0 || end <= from) return false;
+  analysis.segmentRequest = (analysis.segmentRequest || 0) + 1;
+  analysis.traceRange = [from, end];
+  setActivityPanel('analyze');
+  if ($('#segment-from')) $('#segment-from').value = from;
+  if ($('#segment-to')) $('#segment-to').value = end;
+  if ($('#segment-result')) $('#segment-result').innerHTML = `<p>Recorded source effort: <strong>${numberLabel(watts, ' W', 1)}</strong> over ${elapsedLabel(from)}–${elapsedLabel(to)} (end exclusive). This recorded-sample average comes from the power curve. The interval controls are set to this focused span and run a separate elapsed-time calculation.${to > end ? ` The effort includes the final recorded second; the editable trace ends at ${elapsedLabel(end)}, so a recalculated average can differ.` : ''}</p>`;
+  $('#tab-analyze')?.focus();
+  return true;
+}
 async function analyzeSegment() {
   const from = Number($('#segment-from').value), to = Number($('#segment-to').value), d = analysis.detail, request = analysis.detailRequest;
   if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to <= from || to > d.stream_duration_s) { $('#segment-result').innerHTML = '<p class="form-error" role="alert">Choose an end after the start, within the recorded trace.</p>'; return; }
@@ -816,11 +829,7 @@ document.addEventListener('click', (event) => {
   if (el.dataset.backActivity) { const id = el.dataset.backActivity; analysis.activityBack = null; openActivity(id); }
   if (el.hasAttribute('data-explore-athlete-charts')) { closeDrawer(); state.athleteSection = 'analysis'; analysis.tab = 'charts'; renderAthlete(); $('[data-analysis-tab="charts"]')?.focus(); }
   if (el.hasAttribute('data-power-from')) {
-    const from = Number(el.dataset.powerFrom), to = Number(el.dataset.powerTo), end = Math.min(to,analysis.detail?.stream_duration_s || to);
-    analysis.segmentRequest = (analysis.segmentRequest || 0) + 1;
-    analysis.traceRange = [from,end]; setActivityPanel('analyze');
-    if ($('#segment-result')) $('#segment-result').innerHTML = `<p>Source effort: <strong>${numberLabel(Number(el.dataset.powerWatts),' W',1)}</strong> over ${elapsedLabel(from)}–${elapsedLabel(to)} (end exclusive). This recorded-sample average comes from the power curve. The interval controls run a separate elapsed-time calculation.${to > end ? ' The effort includes the final recorded second; the trace ends at the last sample timestamp.' : ''}</p>`;
-    $('#tab-analyze')?.focus();
+    focusRecordedPowerWindow(Number(el.dataset.powerFrom), Number(el.dataset.powerTo), Number(el.dataset.powerWatts));
   }
   if (el.dataset.activityPanel) setActivityPanel(el.dataset.activityPanel);
   if (el.dataset.traceLayout) { analysis.traceLayout = el.dataset.traceLayout; document.querySelectorAll('[data-trace-layout]').forEach((b)=>b.setAttribute('aria-pressed',String(b.dataset.traceLayout === analysis.traceLayout))); paintTrace(); }

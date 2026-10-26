@@ -3,13 +3,14 @@ const PERIOD_POWER_LIMIT = 500;
 let periodPowerRun = null;
 let periodPowerGeneration = 0;
 function periodPowerScope() { return JSON.stringify([state.athleteId, analysis.range?.from, analysis.range?.to, analysis.trendRequest]); }
-function periodPowerIdle() { return { status: 'idle', processed: 0, total: 0, points: [], eligible_activities: 0, unavailable_activities: 0, coverage_limited: false, error: '', caveats: [] }; }
+function periodPowerIdle() { return { status: 'idle', processed: 0, total: 0, points: [], rows: [], evidence: null, eligible_activities: 0, unavailable_activities: 0, coverage_limited: false, error: '', caveats: [] }; }
 // Read by the configurable chart board.
 // deno-lint-ignore no-unused-vars
 function periodPowerSnapshot() { return periodPowerRun?.scope === periodPowerScope() ? periodPowerRun.value : periodPowerIdle(); }
 function periodPowerNotify() {
   if (analysis.tab === 'charts' && typeof chartBoardRefreshPower === 'function') chartBoardRefreshPower();
 }
+// deno-lint-ignore no-unused-vars
 function mergePeriodPowerPoints(existing, rows) {
   const points = new Map(existing.map(point => [point.duration_s, point]));
   for (const row of rows) {
@@ -24,6 +25,7 @@ function mergePeriodPowerPoints(existing, rows) {
 }
 async function calculatePeriodPower() {
   if (!analysis.trends || analysis.trends.error) return;
+  if (periodPowerRun?.scope === periodPowerScope() && periodPowerRun.value.status === 'loading') return;
   const generation = ++periodPowerGeneration, scope = periodPowerScope();
   const athlete = state.athleteId, range = { ...analysis.range };
   const seen = new Set();
@@ -39,6 +41,7 @@ async function calculatePeriodPower() {
   const current = () => generation === periodPowerGeneration && scope === periodPowerScope();
   periodPowerNotify();
   try {
+    if (typeof buildPeriodPowerEvidence !== 'function') throw new Error('Reload this page to load the period-chart calculation.');
     for (let offset = 0; offset < selected.length; offset += 4) {
       if (!current()) return;
       const ids = selected.slice(offset, offset + 4).map(row => row.id);
@@ -46,17 +49,23 @@ async function calculatePeriodPower() {
       if (!current()) return;
       if (result?.version !== 'period-power-batch-v1' || !Array.isArray(result.rows)) throw new Error('Source power calculations are not available on this connection yet.');
       if (result.rows.length !== ids.length || new Set(result.rows.map(row => row.activity_id)).size !== ids.length || result.rows.some(row => !ids.includes(row.activity_id))) throw new Error('The source calculation returned incomplete activity records. Recalculate to try again.');
-      value.points = mergePeriodPowerPoints(value.points, result.rows);
+      value.rows.push(...result.rows);
       value.unavailable_activities += result.rows.filter(row => !row.result?.points?.length).length;
       value.processed += ids.length;
       value.caveats = Array.isArray(result.caveats) ? result.caveats : [];
       periodPowerNotify();
     }
     if (!current()) return;
+    value.evidence = buildPeriodPowerEvidence({ range, rows: value.rows, expected_activities: candidates.length, coverage_limited: value.coverage_limited });
+    value.points = value.evidence.efforts.bests;
+    value.unavailable_activities = value.evidence.coverage.unavailable_effort_activities;
+    value.coverage_limited = value.evidence.coverage.coverage_limited;
+    value.caveats = value.evidence.caveats;
     value.status = 'ready';
   } catch (error) {
     if (!current()) return;
     value.status = 'error'; value.error = error.message || 'Could not calculate source power. Try again.';
+    value.points = []; value.evidence = null;
     value.coverage_limited = true;
   }
   periodPowerNotify();
@@ -66,6 +75,8 @@ function cancelPeriodPower() {
   if (periodPowerRun?.scope === periodPowerScope()) {
     periodPowerRun.value.status = 'idle';
     periodPowerRun.value.points = [];
+    periodPowerRun.value.rows = [];
+    periodPowerRun.value.evidence = null;
     periodPowerRun.value.processed = 0;
   }
   periodPowerNotify();

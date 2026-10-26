@@ -1,0 +1,91 @@
+/* One document scroll and one content gutter. Tables keep local horizontal scroll. */
+.athlete-section-nav {
+  flex-wrap: wrap;
+  overflow: visible;
+  gap: 0 8px;
+}
+.athlete-section-nav button { flex: 0 1 auto; white-space: normal; text-align: left; }
+.analysis-nav { max-width: 100%; flex-wrap: wrap; overflow: visible; }
+.analysis-nav button { white-space: normal; }
+.analysis-filters input, .analysis-filters select { height: auto; min-height: 44px; line-height: 1.4; }
+.topbar .workspace-nav-item > span { min-width: 0; overflow-wrap: anywhere; }
+
+/* Sections belong to the page; only the actual data/control surface needs a frame. */
+.athlete-settings-form { margin: 24px 0; gap: 28px; }
+.athlete-pane .settings-panel {
+  margin: 24px 0;
+  padding: 24px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+.athlete-settings-form .settings-panel { margin: 0; }
+.profile-edit-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12em), 1fr));
+  align-items: start;
+}
+.profile-edit-field, .profile-notes-grid > label { min-width: 0; }
+.profile-notes-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 18em), 1fr)); }
+.profile-notes-grid textarea, .settings-wide-label textarea { min-height: 8em; resize: vertical; }
+.availability-edit { grid-template-columns: repeat(auto-fit, minmax(min(100%, 9em), 1fr)); gap: 18px 12px; }
+.availability-edit .settings-check { align-items: start; min-height: 44px; line-height: 1.45; }
+.settings-check input { flex: 0 0 20px; }
+.availability-edit input[type=number] { min-width: 0; }
+.power-zone-preview > div { grid-template-columns: repeat(auto-fit, minmax(min(100%, 26em), 1fr)); gap: 0 24px; }
+.power-zone-preview > div > .power-zone-edit-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 14px 0;
+  gap: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+.power-zone-preview .power-zone-edit-row > span { grid-column: 1 / -1; font-weight: 700; }
+.power-zone-preview .power-zone-edit-row label { min-width: 0; margin: 0; justify-content: start; }
+.power-zone-preview .power-zone-edit-row input { flex: none; width: 5em; min-height: 44px; font: inherit; }
+.power-zone-preview .power-zone-edit-row strong { grid-column: auto; min-width: 0; text-align: right; white-space: nowrap; }
+.profile-save-bar { position: static; padding: 16px 0; border: 0; border-top: 1px solid var(--line); background: transparent; flex-wrap: wrap; }
+
+/* The activity graph, map, and readings are one workspace, not nested windows. */
+.drawer.page-mode .drawer-head { flex-wrap: wrap; }
+.drawer.page-mode .drawer-head > div { flex: 1 1 20em; min-width: 0; }
+.drawer.page-mode .drawer-head #close-drawer { flex: none; width: auto; min-width: max-content; max-width: 100%; white-space: normal; }
+.trace-toolbar { background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0 0 20px; margin-bottom: 24px; }
+.trace-canvas { background: transparent; border: 0; border-radius: 0; padding: 0; }
+.segment-inputs { grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr)); }
+.overlay-scale-note { font-size: 12px; }
+.ai-review-chart-title span { font-size: 12px; }
+.trace-canvas .activity-route { background: transparent; border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 20px 0 0; }
+.activity-record-details { background: transparent; border: 0; border-block: 1px solid var(--line); border-radius: 0; padding: 12px 0; }
+.power-review-grid > section, .activity-notes-grid > section,
+#activity-ai, #activity-laps, #activity-execution { border: 0; border-radius: 0; padding: 0; background: transparent; }
+.activity-values.summary-primary { grid-template-columns: repeat(auto-fit, minmax(min(100%, 9em), 1fr)); }
+.activity-values dd { overflow-wrap: anywhere; }
+.planning-brief { border: 0; border-radius: 0; padding: 0; background: transparent; }
+.planning-workspace { grid-template-columns: minmax(220px, .7fr) minmax(0, 2fr); }
+.planning-canvas .week-review { border-radius: 0; border-inline: 0; background: transparent; padding-inline: 0; }
+
+/* Keep the entire session instruction accessible in the calendar. */
+.month-event-description { display: block; -webkit-line-clamp: unset; overflow: visible; white-space: normal; }
+.month-event strong, .month-event small { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+.month-week-summary dl > div { flex-wrap: wrap; }
+.month-week-summary dd { margin-left: auto; }
+.season-bars { height: auto; min-height: 180px; }
+.season-bar-pair { flex: 0 0 148px; }
+.season-bar-group small { font-size: 12px; height: auto; min-height: 1.5em; line-height: 1.5; }
+
+@media (max-width: 767.98px) {
+  .athlete-section-nav { flex-wrap: wrap; overflow: visible; gap: 0 4px; }
+  .athlete-section-nav button { padding: 10px 8px; }
+  .analysis-nav button { flex: 0 1 auto; }
+  .power-zone-preview > div > .power-zone-edit-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .power-zone-preview .power-zone-edit-row strong { grid-column: 1 / -1; text-align: left; }
+  .power-zone-preview .power-zone-edit-row label { flex-wrap: wrap; }
+  .trace-canvas { padding: 0; }
+  .planning-workspace { display: block; }
+  .planning-brief { padding: 0 0 24px; border-bottom: 1px solid var(--line); }
+  .activity-metric-band { padding: 18px 14px; }
+  .activity-values.summary-primary { grid-template-columns: repeat(auto-fit, minmax(min(100%, 8em), 1fr)); }
+  .season-numbers { grid-template-columns: 1fr; }
+  .season-numbers > div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .season-numbers > div:last-child { border-bottom: 0; }
+}
