@@ -1,0 +1,37 @@
+/* Dated setting records use the profile's natural document flow. */
+.settings-history { min-width: 0; }
+.sh-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px 24px; }
+.sh-heading > div { flex: 1 1 320px; }
+.sh-heading h4 { margin: 0 0 8px; font-size: 21px; }
+.sh-heading p { max-width: 75ch; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+.settings-history :is(button,select,summary) { min-height: 44px; }
+.settings-history :is(button,select,summary):focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.sh-filter { display: grid; width: min(100%, 280px); gap: 6px; margin-top: 20px; color: var(--muted); font-size: 13px; }
+.sh-filter select { width: 100%; min-width: 0; font-size: 16px; }
+.sh-status { margin: 10px 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.sh-status:empty { margin: 0; }
+.sh-current { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13em), 1fr)); gap: 18px; margin: 22px 0; padding-block: 18px; border-block: 1px solid var(--line); }
+.sh-current > div { display: grid; align-content: start; gap: 8px; }
+.sh-current span { color: var(--muted); font-size: 13px; }
+.sh-current strong { font-size: 24px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.sh-current p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.sh-record { padding: 20px 0; border-bottom: 1px solid var(--line); }
+.sh-record-summary { display: grid; grid-template-columns: minmax(130px, .65fr) minmax(0, 2fr); gap: 18px 24px; }
+.sh-record-summary h5 { margin: 0 0 8px; font-size: 14px; font-weight: 400; color: var(--muted); }
+.sh-record-summary strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.sh-record-summary dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 0; }
+.sh-record-summary dt, .sh-source dt { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.sh-record-summary dd, .sh-source dd { margin: 0; font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+.sh-source, .sh-notes { margin-top: 12px; font-size: 13px; line-height: 1.55; }
+.sh-source summary, .sh-notes summary { padding-block: 12px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.sh-source dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 14px 24px; margin: 12px 0; }
+.sh-source p, .sh-notes li { color: var(--muted); max-width: 75ch; }
+.sh-notes ul { margin: 0 0 12px; padding-left: 20px; }
+.sh-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 20px; }
+.sh-actions > span, .sh-export-note { font-size: 13px; line-height: 1.5; color: var(--muted); }
+.sh-empty, .sh-loading { padding: 20px 0; font-size: 14px; line-height: 1.6; }
+.sh-empty p { color: var(--muted); max-width: 75ch; }
+@media (max-width: 767px) {
+  .sh-record-summary { grid-template-columns: 1fr; }
+  .sh-record-summary dl { grid-template-columns: repeat(auto-fit, minmax(min(100%, 12em), 1fr)); }
+}

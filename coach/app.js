@@ -48,7 +48,7 @@ function saveSession(value) {
   try { localStorage.setItem(SESSION_KEY, saved); sessionStorage.removeItem(SESSION_KEY); return true; }
   catch { try { sessionStorage.setItem(SESSION_KEY, saved); } catch { /* In-memory session lasts until this page closes. */ } return false; }
 }
-function clearSession() { if (typeof resetIntervalWorkbenchDrafts === 'function') resetIntervalWorkbenchDrafts(); memorySession = null; try { localStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } try { sessionStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } }
+function clearSession() { state.athleteSettingsRequest = (state.athleteSettingsRequest || 0) + 1; if (typeof resetSettingsHistory === 'function') resetSettingsHistory(); if (typeof resetIntervalWorkbenchDrafts === 'function') resetIntervalWorkbenchDrafts(); memorySession = null; try { localStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } try { sessionStorage.removeItem(SESSION_KEY); } catch { /* Storage may be disabled. */ } }
 function setStatus(message, isError = false, area = '#global-status') {
   const node = $(area); if (!node) return; node.textContent = message; node.classList.toggle('is-error', isError);
 }
@@ -525,6 +525,7 @@ function renderAthlete() {
     <section ${section !== 'tools' ? 'hidden' : ''}><h3>Coaching tools</h3><p class="helper">Choose the task you need. AI suggestions are always reviewed before saving.</p><div class="coaching-tools">${[['new-workout','Create workout','Set the title, instructions and training blocks yourself.'],['ai-workout','Draft workout with AI','Describe a session, then review and edit the proposed blocks.'],['build-week','Build or edit a week','Plan this week or next week and review before publishing.'],['review-week','Review this week with AI','Ask for one session adjustment using the athlete’s current context.'],['new-note','Add athlete note','Record training response, goals, preferences or constraints.'],['new-meeting','Log coach call','Save call notes and agreed changes; transcript assistance is optional.']].map(([action,label,description]) => `<button type="button" class="secondary" data-action="${action}"><strong>${label}</strong><span>${description}</span></button>`).join('')}</div></section>
     <div class="context-column" ${section !== 'notes' ? 'hidden' : ''}><section class="profile-notes"><div class="section-head"><h3>Athlete notes</h3><button type="button" class="secondary" data-action="new-note">Add note</button></div><div class="meeting-list">${noteRows}</div></section><section class="calls-section"><div class="section-head"><h3>Coach calls</h3><button type="button" class="secondary" data-action="new-meeting">Add call notes</button></div><div class="meeting-list">${meetingRows}</div></section></div></div></div>`;
   if (section === 'analysis') paintAnalysis();
+  if (section === 'profile' && typeof loadSettingsHistory === 'function') loadSettingsHistory();
   if (section === 'season' && !state.season) loadSeason();
   if (section === 'calendar') {
     const needed = state.calendarLayout === 'month' ? monthWeeks(state.calendarMonth) : [week];
@@ -534,7 +535,9 @@ function renderAthlete() {
 }
 async function saveAthleteSettings() {
   const form = $('#athlete-settings-form');
-  if (!form || !state.athleteId || !form.reportValidity()) return;
+  if (!form || !state.athleteId || form.querySelector('[data-action="save-athlete-settings"]')?.disabled || !form.reportValidity()) return;
+  const athleteId = state.athleteId, athleteRequest = state.athleteRequest, actorId = session()?.user?.id;
+  const sameAthlete = () => state.athleteId === athleteId && state.athleteRequest === athleteRequest && session()?.user?.id === actorId;
   const value = (name) => form.elements.namedItem(name)?.value?.trim() ?? '';
   const checked = (name) => Boolean(form.elements.namedItem(name)?.checked);
   const optional = (name) => value(name) === '' ? null : Number(value(name));
@@ -569,18 +572,23 @@ async function saveAthleteSettings() {
     setStatus('Minimum weekly hours must be no more than maximum weekly hours.', true, '#athlete-settings-status');
     return;
   }
+  const request = (state.athleteSettingsRequest || 0) + 1; state.athleteSettingsRequest = request;
   button.disabled = true;
   setStatus('Saving athlete settings…', false, '#athlete-settings-status');
   try {
-    const { settings, change } = await portal('save_athlete_settings', { athlete_id: state.athleteId, profile, zones, training_context });
+    const { settings, change } = await portal('save_athlete_settings', { athlete_id: athleteId, profile, zones, training_context });
+    if (!sameAthlete() || state.athleteSettingsRequest !== request) return;
+    if (typeof invalidateSettingsHistory === 'function') invalidateSettingsHistory(athleteId);
     state.athlete.profile = settings.profile;
     state.athlete.zones = settings.zones;
     state.athlete.training_context = settings.training_context;
     if (change) state.athlete.profile_changes = [change, ...(state.athlete.profile_changes || [])].slice(0, 8);
+    if (state.athleteSection !== 'profile' || $('#athlete-settings-form') !== form) return;
     renderAthlete();
     setStatus('Athlete settings saved. Future workout targets use these values.', false, '#athlete-settings-status');
     $('[data-action="save-athlete-settings"]')?.focus();
   } catch (error) {
+    if (!sameAthlete() || state.athleteSettingsRequest !== request || $('#athlete-settings-form') !== form) return;
     button.disabled = false;
     setStatus(error.message, true, '#athlete-settings-status');
   }
